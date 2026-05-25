@@ -1,5 +1,10 @@
 # Retail Multi-Agent AI
 
+[![CI](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml)
+[![Docker](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
 A public, production-oriented repository for an intermediate retail multi-agent AI system. The project is designed for a 2-3 student team, runs within the constraints of an RTX 3060 and 32GB RAM, and is organized for testing, deployment, documentation, and CI/CD from the start.
 
 ## Repository Goals
@@ -47,7 +52,25 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env
 make start-infra
+python -m src.api.main
 ```
+
+## Installation
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+## Screenshots
+
+Add release screenshots here as the dashboard matures.
+
+- Dashboard overview placeholder: `docs/images/dashboard-placeholder.png`
+- Forecast page placeholder: `docs/images/forecast-placeholder.png`
+- Simulation placeholder: `docs/images/simulation-placeholder.png`
 
 ## Documentation
 
