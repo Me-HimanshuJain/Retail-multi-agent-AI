@@ -21,3 +21,4 @@ data/raw/
 data/processed/
 mlruns/
 streamlit.log
+deepseek_first_given.md

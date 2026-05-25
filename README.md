@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml)
 [![Docker](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml)
+[![Coverage](https://img.shields.io/badge/coverage-84%25-brightgreen)](PUBLIC_RELEASE_SCORE.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
