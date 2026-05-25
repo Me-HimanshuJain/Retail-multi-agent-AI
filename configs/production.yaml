@@ -1,0 +1,16 @@
+environment: production
+database:
+  url: ${DATABASE_URL}
+redis:
+  host: ${REDIS_HOST}
+  port: ${REDIS_PORT}
+forecasting:
+  horizon: 28
+inventory:
+  service_level: 0.98
+pricing:
+  min_margin: 0.15
+monitoring:
+  prometheus: true
+logging:
+  level: WARNING

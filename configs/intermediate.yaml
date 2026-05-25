@@ -1,0 +1,16 @@
+environment: intermediate
+database:
+  url: ${DATABASE_URL}
+redis:
+  host: ${REDIS_HOST}
+  port: ${REDIS_PORT}
+forecasting:
+  horizon: 28
+inventory:
+  service_level: 0.95
+pricing:
+  min_margin: 0.1
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}
+logging:
+  level: INFO

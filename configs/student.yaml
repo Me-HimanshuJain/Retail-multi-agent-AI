@@ -1,0 +1,14 @@
+environment: student
+database:
+  url: sqlite:///retail.db
+redis:
+  host: localhost
+  port: 6379
+forecasting:
+  horizon: 7
+inventory:
+  service_level: 0.9
+pricing:
+  min_margin: 0.05
+logging:
+  level: INFO
