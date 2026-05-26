@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.routes import auth, health, simulation
+from src.api.routes import auth, forecast, health, simulation
 
 
 @asynccontextmanager
@@ -20,6 +20,7 @@ app = FastAPI(title="Retail Multi-Agent AI API", version="0.1.0", lifespan=lifes
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(auth.router)
 app.include_router(health.router)
+app.include_router(forecast.router)
 app.include_router(simulation.router)
 
 
