@@ -75,6 +75,10 @@ def engineer_features(long_frame: pd.DataFrame, calendar_df: pd.DataFrame, price
     prices = prices_df.copy()
     prices.columns = prices.columns.str.strip()
 
+    if "d" not in calendar.columns:
+        calendar = calendar.reset_index(drop=True)
+        calendar["d"] = [f"d_{index + 1}" for index in range(len(calendar))]
+
     if "date" not in calendar.columns and "d" in calendar.columns:
         calendar["date"] = pd.to_datetime(calendar["wm_yr_wk"], errors="coerce")
     elif "date" in calendar.columns:
@@ -131,10 +135,23 @@ def build_feature_columns(frame: pd.DataFrame) -> List[str]:
 
 
 def split_train_validation(frame: pd.DataFrame, validation_days: int = 28) -> tuple[pd.DataFrame, pd.DataFrame]:
-    max_day = int(frame["d_num"].max())
-    cutoff = max_day - validation_days
+    unique_days = sorted(int(day) for day in frame["d_num"].dropna().unique())
+    if len(unique_days) < 2:
+        raise ValueError("Need at least two unique days to split train and validation")
+
+    effective_validation_days = min(max(validation_days, 1), len(unique_days) - 1)
+    cutoff_idx = len(unique_days) - effective_validation_days - 1
+    cutoff = unique_days[cutoff_idx]
+
     train = frame[frame["d_num"] <= cutoff].copy()
     validation = frame[frame["d_num"] > cutoff].copy()
+
+    if train.empty or validation.empty:
+        midpoint = len(unique_days) // 2
+        cutoff = unique_days[midpoint - 1]
+        train = frame[frame["d_num"] <= cutoff].copy()
+        validation = frame[frame["d_num"] > cutoff].copy()
+
     return train, validation
 
 

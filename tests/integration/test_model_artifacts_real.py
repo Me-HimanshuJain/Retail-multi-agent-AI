@@ -4,12 +4,44 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
+from lightgbm import Booster
+from lightgbm.basic import LightGBMError
 
 from src.models.forecasting.evaluation import evaluate_forecast
 from src.models.forecasting.xgboost_model import XGBoostForecaster
+
+
+def test_lgbm_ca1_artifact_loads_and_predicts() -> None:
+    model_path = Path("models") / "lgb_model_CA_1.bin"
+    if not model_path.exists():
+        pytest.skip(f"Missing artifact: {model_path}")
+
+    try:
+        model = Booster(model_file=str(model_path))
+    except LightGBMError:
+        model = joblib.load(model_path)
+
+    feature_names = list(model.feature_name())
+    frame = pd.DataFrame([{feature: 1.0 for feature in feature_names}])
+    prediction = model.predict(frame)
+    assert len(prediction) == 1
+    assert not np.isnan(float(prediction[0]))
+
+
+def test_ca1_metrics_json_has_required_fields() -> None:
+    metrics_path = Path("models") / "lgb_model_CA_1.metrics.json"
+    if not metrics_path.exists():
+        pytest.skip(f"Missing metrics file: {metrics_path}")
+
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    for required in ["rmse", "mae", "mape", "wrmsse", "training_time_sec"]:
+        assert required in metrics
+        assert float(metrics[required]) >= 0.0
 
 
 def test_xgb_artifact_loads_and_predicts() -> None:

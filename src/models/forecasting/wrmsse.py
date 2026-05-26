@@ -86,9 +86,20 @@ class WRMSSEEvaluator:
         aggregated = frame.groupby(base_cols + ["d_num"], as_index=False)["sales"].sum()
         return aggregated
 
+    def _ensure_hierarchy_columns(self, frame: pd.DataFrame) -> pd.DataFrame:
+        required = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id", "d_num", "sales"]
+        if all(column in frame.columns for column in required):
+            return frame
+
+        enriched = frame.copy()
+        mapping = self._train[["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]].drop_duplicates()
+        if "id" in enriched.columns:
+            enriched = enriched.merge(mapping, on="id", how="left")
+        return enriched
+
     def score(self, actual_long: pd.DataFrame, predicted_long: pd.DataFrame) -> float:
-        actual = actual_long.copy()
-        predicted = predicted_long.copy()
+        actual = self._ensure_hierarchy_columns(actual_long.copy())
+        predicted = self._ensure_hierarchy_columns(predicted_long.copy())
         total_scores: List[float] = []
 
         for level_name, group_cols in self.levels:

@@ -20,7 +20,10 @@ def load_m5_dataset(data_dir: str | Path) -> M5Dataset:
     base = Path(data_dir)
     calendar = pd.read_csv(base / "calendar.csv")
     sell_prices = pd.read_csv(base / "sell_prices.csv")
-    sales_train_validation = pd.read_csv(base / "sales_train_validation.csv")
+    sales_path = base / "sales_train_validation.csv"
+    if not sales_path.exists():
+        sales_path = base / "sales_test_validation.csv"
+    sales_train_validation = pd.read_csv(sales_path)
     weights_path = base / "weights_validation.csv"
     weights_validation = pd.read_csv(weights_path) if weights_path.exists() else None
     return M5Dataset(
