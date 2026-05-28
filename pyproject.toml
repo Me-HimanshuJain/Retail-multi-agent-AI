@@ -58,3 +58,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-v --strict-markers --color=yes"
 markers = ["unit: unit tests", "integration: integration tests", "e2e: end-to-end tests", "smoke: smoke tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
