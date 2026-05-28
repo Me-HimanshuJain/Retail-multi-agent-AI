@@ -50,21 +50,27 @@ def test_xgb_artifact_loads_and_predicts() -> None:
         pytest.skip(f"Missing artifact: {model_path}")
 
     model = XGBoostForecaster.load(model_path)
-    frame = pd.DataFrame(
-        [
-            {
-                "lag_7": 11.0,
-                "lag_14": 12.0,
-                "lag_28": 13.0,
-                "rmean_28_7": 10.5,
-                "rmean_28_14": 10.0,
-                "rmean_28_28": 9.8,
-                "rstd_28_7": 1.2,
-                "rstd_28_14": 1.6,
-                "rstd_28_28": 2.1,
-            }
-        ]
-    )
+    
+    # Create test data with all required features for the model
+    if model.feature_names:
+        frame = pd.DataFrame([{feature: 1.0 for feature in model.feature_names}])
+    else:
+        frame = pd.DataFrame(
+            [
+                {
+                    "lag_7": 11.0,
+                    "lag_14": 12.0,
+                    "lag_28": 13.0,
+                    "rmean_28_7": 10.5,
+                    "rmean_28_14": 10.0,
+                    "rmean_28_28": 9.8,
+                    "rstd_28_7": 1.2,
+                    "rstd_28_14": 1.6,
+                    "rstd_28_28": 2.1,
+                }
+            ]
+        )
+    
     prediction = model.predict(frame)
     assert prediction["median"].shape[0] == 1
     assert float(prediction["p90"][0]) >= float(prediction["p10"][0])
