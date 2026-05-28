@@ -1,24 +1,94 @@
+# Python & Dependencies
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+MANIFEST
+
+# Virtual Environments
 .venv/
 venv/
+ENV/
 env/
-.env
+.env.local
+.env.*.local
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Testing
 .pytest_cache/
-.mypy_cache/
 .coverage
 htmlcov/
+.tox/
+.hypothesis/
+junit.xml
+
+# Jupyter Notebooks
 .ipynb_checkpoints/
-.DS_Store
-Thumbs.db
-logs/
+
+# ML & Caching
+.mypy_cache/
+.ruff_cache/
+cache/
+.cache/
+
+# Generated/Local
+*.pkl
+*.tmp
+*.temp
+tmp/
+temp/
 *.log
+logs/
+streamlit.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 retail.db
-models/*.pt
-models/*.pkl
+
+# Data (processed/raw kept in data/ folder structure)
 data/raw/
 data/processed/
 mlruns/
-streamlit.log
+
+# OS Files
+Thumbs.db
+
+# Model files (but keep trained .bin for inference)
+models/*.pt
+
+# IDE/Editor
+.idea/
+.vscode/settings.json
+.vscode/extensions.json
+
+# Environment
+.env
+.env.*.local
+
+# Stale artifacts
 deepseek_first_given.md
