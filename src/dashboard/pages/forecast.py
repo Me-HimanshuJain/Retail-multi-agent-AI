@@ -83,11 +83,23 @@ def _load_trained_predictions(store_id: str, horizon: int) -> tuple[pd.DataFrame
             xgb_vals.append(xgb_point)
 
         if xgb_point is not None:
-            ensemble = ForecastEnsemble(weights={"xgb": 0.5, "lgb": 0.5})
-            combined = ensemble.combine({"xgb": pd.Series([xgb_point]).to_numpy(), "lgb": pd.Series([lgb_point]).to_numpy()})
-            forecast_val = float(combined["median"][0])
-            lower = float(combined["p10"][0])
-            upper = float(combined["p90"][0])
+            # Prefer trained ensemble weights when available
+            ensemble_path = Path(f"models/ensemble_{store_id}.bin")
+            if ensemble_path.exists():
+                try:
+                    ensemble = ForecastEnsemble.load(ensemble_path)
+                    member_map = {name: pd.Series([xgb_point]).to_numpy() if "xgb" in name.lower() else pd.Series([lgb_point]).to_numpy() for name in ensemble.weights.keys()}
+                    combined = ensemble.combine(member_map)
+                    forecast_val = float(combined["median"][0])
+                    lower = float(combined["p10"][0])
+                    upper = float(combined["p90"][0])
+                except Exception:
+                    # Fallback to equal-weight combine if ensemble artifact fails
+                    ensemble = ForecastEnsemble(weights={"xgb": 0.5, "lgb": 0.5})
+                    combined = ensemble.combine({"xgb": pd.Series([xgb_point]).to_numpy(), "lgb": pd.Series([lgb_point]).to_numpy()})
+                    forecast_val = float(combined["median"][0])
+                    lower = float(combined["p10"][0])
+                    upper = float(combined["p90"][0])
         else:
             forecast_val = lgb_point
             lower = lgb_point * 0.92
