@@ -15,18 +15,21 @@ from src.models.forecasting.ensemble import ForecastEnsemble
 from src.models.forecasting.xgboost_model import XGBoostForecaster
 
 
-def _build_latest_feature_row(columns: list[str]) -> pd.DataFrame:
-    # This minimal feature row should be replaced by real feature service integration.
-    return pd.DataFrame([{column: 10.0 for column in columns}])
+def _available_stores() -> list[str]:
+    stores = []
+    for path in Path("models").glob("lgb_model_*.bin"):
+        store = path.stem.replace("lgb_model_", "")
+        stores.append(store)
+    return sorted(set(stores))
 
 
-def _load_models() -> tuple[object, XGBoostForecaster | None]:
+def _load_models(store_id: str) -> tuple[object, XGBoostForecaster | None]:
     try:
-        lgb = Booster(model_file="models/lgb_model_CA_1.bin")
+        lgb = Booster(model_file=f"models/lgb_model_{store_id}.bin")
     except LightGBMError:
-        lgb = joblib.load("models/lgb_model_CA_1.bin")
+        lgb = joblib.load(f"models/lgb_model_{store_id}.bin")
 
-    xgb_path = Path("models/xgb_model_CA_1.bin")
+    xgb_path = Path(f"models/xgb_model_{store_id}.bin")
     xgb = XGBoostForecaster.load(xgb_path) if xgb_path.exists() else None
     return lgb, xgb
 
@@ -47,8 +50,8 @@ def _roll_feature_state(state: dict[str, float], predicted: float) -> None:
         state[name] = spread / 3.0
 
 
-def _load_trained_predictions(horizon: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    lgb, xgb = _load_models()
+def _load_trained_predictions(store_id: str, horizon: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    lgb, xgb = _load_models(store_id=store_id)
     state = {
         "lag_7": 10.0,
         "lag_14": 10.0,
@@ -90,7 +93,7 @@ def _load_trained_predictions(horizon: int) -> tuple[pd.DataFrame, pd.DataFrame]
             lower = lgb_point * 0.92
             upper = lgb_point * 1.08
 
-        rows.append({"day": day, "forecast": forecast_val, "lower": lower, "upper": upper})
+        rows.append({"store_id": store_id, "day": day, "forecast": forecast_val, "lower": lower, "upper": upper})
         _roll_feature_state(state, forecast_val)
 
     forecast = pd.DataFrame(rows)
@@ -98,31 +101,68 @@ def _load_trained_predictions(horizon: int) -> tuple[pd.DataFrame, pd.DataFrame]
         {
             "model": ["XGBoost", "LightGBM", "Ensemble"],
             "prediction": [float(pd.Series(xgb_vals).mean()) if xgb_vals else float("nan"), float(pd.Series(lgb_vals).mean()), float(forecast["forecast"].mean())],
+            "store_id": [store_id, store_id, store_id],
         }
     )
     return forecast, model_cmp
 
 
-def _generate_multi_product_forecast(forecast_value: float) -> pd.DataFrame:
-    return pd.DataFrame({"product": ["CA_1_item_1", "CA_1_item_2"], "day_1_forecast": [forecast_value, forecast_value * 0.92]})
+def _generate_multi_product_forecast(store_id: str, forecast_value: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "store_product": [f"{store_id}_item_1", f"{store_id}_item_2"],
+            "day_1_forecast": [forecast_value, forecast_value * 0.92],
+        }
+    )
 
 
 def show_forecast_page() -> None:
     st.title("Demand Forecasts")
-    horizon = st.slider("Forecast Horizon (days)", min_value=1, max_value=28, value=14)
-    try:
-        df, model_cmp = _load_trained_predictions(horizon=horizon)
-    except FileNotFoundError as exc:
-        st.error(f"Missing model artifact: {exc}")
+    stores = _available_stores()
+    if not stores:
+        st.error("No LightGBM store artifacts found in models/.")
         return
 
+    selected_stores = st.multiselect("Select Stores", options=stores, default=stores[: min(3, len(stores))])
+    if not selected_stores:
+        st.info("Select at least one store to render forecasts.")
+        return
+
+    horizon = st.slider("Forecast Horizon (days)", min_value=1, max_value=28, value=14)
+
+    forecast_frames = []
+    model_cmp_frames = []
+    product_frames = []
+    for store_id in selected_stores:
+        try:
+            df, model_cmp = _load_trained_predictions(store_id=store_id, horizon=horizon)
+        except FileNotFoundError as exc:
+            st.warning(f"Skipping {store_id}: missing model artifact ({exc})")
+            continue
+        forecast_frames.append(df)
+        model_cmp_frames.append(model_cmp)
+        product_frames.append(_generate_multi_product_forecast(store_id=store_id, forecast_value=float(df["forecast"].iloc[0])))
+
+    if not forecast_frames:
+        st.error("No forecasts could be produced for the selected stores.")
+        return
+
+    all_forecasts = pd.concat(forecast_frames, ignore_index=True)
+    all_model_cmp = pd.concat(model_cmp_frames, ignore_index=True)
+    all_products = pd.concat(product_frames, ignore_index=True)
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["day"], y=df["forecast"], name="Forecast"))
-    fig.add_trace(go.Scatter(x=df["day"], y=df["lower"], name="P10", line={"dash": "dot"}))
-    fig.add_trace(go.Scatter(x=df["day"], y=df["upper"], name="P90", line={"dash": "dot"}))
+    for store_id in selected_stores:
+        subset = all_forecasts[all_forecasts["store_id"] == store_id]
+        if subset.empty:
+            continue
+        fig.add_trace(go.Scatter(x=subset["day"], y=subset["forecast"], name=f"{store_id} Forecast"))
+        fig.add_trace(go.Scatter(x=subset["day"], y=subset["lower"], name=f"{store_id} P10", line={"dash": "dot"}))
+        fig.add_trace(go.Scatter(x=subset["day"], y=subset["upper"], name=f"{store_id} P90", line={"dash": "dot"}))
+
     st.plotly_chart(fig, use_container_width=True)
     st.subheader("Model Predictions")
-    st.dataframe(model_cmp, use_container_width=True)
+    st.dataframe(all_model_cmp, use_container_width=True)
     st.subheader("Inventory-linked Forecast")
-    st.dataframe(_generate_multi_product_forecast(float(df["forecast"].iloc[0])), use_container_width=True)
+    st.dataframe(all_products, use_container_width=True)
 
