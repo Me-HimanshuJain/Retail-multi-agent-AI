@@ -100,4 +100,9 @@ async def get_simulation_metrics() -> SimulationMetrics:
 
 @router.post("/disrupt")
 async def inject_disruption(request: DisruptionRequest) -> dict:
-    return {"status": "queued", "type": request.type, "severity": request.severity}
+    global _current_simulation
+    if not _current_simulation:
+        raise HTTPException(status_code=400, detail="No active simulation running.")
+    
+    _current_simulation.inject_disruption(request.type, request.severity)
+    return {"status": "injected", "type": request.type, "severity": request.severity}
