@@ -12,6 +12,9 @@ from src.dashboard.pages.kpi import show_kpi_page
 from src.dashboard.pages.logistics import show_logistics_page
 from src.dashboard.pages.simulation_control import show_simulation_page
 
+# Application Constants
+ENGINE_VERSION = "v0.9.0"  # Updated to match our new Multi-Agent + Ensemble architecture
+
 # 1. Page Config (Must be first)
 st.set_page_config(
     page_title="Retail Multi-Agent AI", 
@@ -20,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. Inject Custom CSS for a clean, edge-to-edge SaaS look
+# 2. Inject Custom CSS for a clean, edge-to-edge dark mode look
 st.markdown("""
     <style>
         /* Hide default Streamlit branding */
@@ -34,19 +37,19 @@ st.markdown("""
             padding-bottom: 2rem;
         }
         
-        /* Style the sidebar slightly darker for contrast */
+        /* Style the sidebar darker for sharp contrast */
         [data-testid="stSidebar"] {
-            background-color: #0e1117;
+            background-color: #09090b;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # 3. Build the Premium Sidebar
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center; color: #00d2ff;'>🧠 Retail AI Core</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #39FF14;'>🧠 Retail AI Core</h2>", unsafe_allow_html=True)
     st.markdown("---")
     
-    # Modern Option Menu
+    # Modern Option Menu with neon green accents
     page = option_menu(
         menu_title=None,  # Hide the default title
         options=[
@@ -69,20 +72,21 @@ with st.sidebar:
         default_index=0,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
-            "icon": {"color": "#00d2ff", "font-size": "18px"}, 
+            "icon": {"color": "#39FF14", "font-size": "18px"}, 
             "nav-link": {
                 "font-size": "15px", 
                 "text-align": "left", 
                 "margin": "0px", 
                 "padding": "10px",
-                "--hover-color": "#262730"
+                "--hover-color": "#1a1c23"
             },
-            "nav-link-selected": {"background-color": "#1e1e24", "border-left": "4px solid #00d2ff"},
+            "nav-link-selected": {"background-color": "#121418", "border-left": "4px solid #39FF14"},
         }
     )
     
     st.markdown("---")
-    st.caption("Status: **v0.7.0 Engine Active** 🟢")
+    # Dynamically inject the version constant
+    st.caption(f"Status: **{ENGINE_VERSION} Engine Active** 🟢")
 
 # 4. Route to the correct page
 if page == "Executive Overview":

@@ -113,46 +113,30 @@ class DemandGenerator:
         self.history: list[float] = [max(0.0, base_demand + rng.normal(0, 1.5)) for _ in range(60)]
         self.demand_cache: dict[int, float] = {}
 
-        self._lgb_model    = None
-        self._xgb_model    = None
+        self._model        = None
         self._feat_names: list[str] = []
         self._using_model  = False
-        
-        self.ensemble = ForecastEnsemble()
 
-        self._try_load_models()
+        self._try_load_model()
 
     # ------------------------------------------------------------------
     # Model loading
     # ------------------------------------------------------------------
 
-    def _try_load_models(self) -> None:
-        # 1. Load LightGBM
-        path_lgb = Path(MODEL_DIR) / f"lgb_model_{self.store_id}.bin"
-        if not path_lgb.exists():
-            path_lgb = Path(MODEL_DIR) / "lgb_model_CA_1.bin"
+    def _try_load_model(self) -> None:
+        path = Path(MODEL_DIR) / f"lgb_model_{self.store_id}.bin"
+        if not path.exists():
+            path = Path(MODEL_DIR) / "lgb_model_CA_1.bin"  # graceful fallback
         try:
             import lightgbm as lgb
-            self._lgb_model = lgb.Booster(model_file=str(path_lgb))
-            self._feat_names = self._lgb_model.feature_name()
+            self._model      = lgb.Booster(model_file=str(path))
+            self._feat_names = self._model.feature_name()
             self._using_model = True
-        except Exception:
-            pass
-
-        # 2. Load XGBoost
-        path_xgb = Path(MODEL_DIR) / f"xgb_model_{self.store_id}.json"
-        if not path_xgb.exists():
-            path_xgb = Path(MODEL_DIR) / "xgb_model_CA_1.json"
-        try:
-            import xgboost as xgb
-            self._xgb_model = xgb.Booster()
-            self._xgb_model.load_model(str(path_xgb))
-            self._using_model = True
-        except Exception:
-            pass
-            
-        if not self._using_model:
-            warnings.warn(f"DemandGenerator[{self.store_id}]: No models found. Using statistical baseline.")
+        except Exception as exc:
+            warnings.warn(
+                f"DemandGenerator[{self.store_id}]: could not load model ({exc}). "
+                "Using statistical baseline."
+            )
 
     # ------------------------------------------------------------------
     # Feature builder — all 35 features the trained model expects
@@ -209,24 +193,13 @@ class DemandGenerator:
         """Model prediction with smoothing, or statistical baseline."""
         date = _M5_BASE_DATE + timedelta(days=day_index + 1)
 
-        if self._using_model:
+        if self._using_model and self._model is not None:
             try:
-                row_df = self._build_row(date)
-                preds = {}
-
-                if self._lgb_model:
-                    preds["lgbm"] = np.array([self._lgb_model.predict(row_df)[0]])
-                
-                if self._xgb_model:
-                    import xgboost as xgb
-                    dmat = xgb.DMatrix(row_df)
-                    preds["xgb"] = np.array([self._xgb_model.predict(dmat)[0]])
-
-                if preds:
-                    blended = self.ensemble.combine(preds)
-                    raw = float(blended["median"][0])
-                    smoothed = _SMOOTH_ALPHA * raw + (1.0 - _SMOOTH_ALPHA) * float(np.mean(self.history[-7:]))
-                    return max(0.0, smoothed)
+                row = self._build_row(date)
+                raw = float(self._model.predict(row)[0])
+                # Smooth to prevent recursive lag collapse
+                smoothed = _SMOOTH_ALPHA * raw + (1.0 - _SMOOTH_ALPHA) * float(np.mean(self.history[-7:]))
+                return max(0.0, smoothed)
             except Exception as exc:
                 warnings.warn(f"DemandGenerator[{self.store_id}] predict failed: {exc}. Using baseline.")
 
