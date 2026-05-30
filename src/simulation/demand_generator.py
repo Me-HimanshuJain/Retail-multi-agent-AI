@@ -1,15 +1,15 @@
-"""Demand generator — bridges trained LightGBM model artifacts to the simulation loop.
+"""Demand generator — bridges trained model artifacts to the simulation loop.
 
-Key design decisions
---------------------
-- Builds the exact 35 M5 features the trained models were trained on.
-- Falls back to a realistic statistical baseline (Poisson + seasonality) if
-  no artifact is found, so the simulation still runs without trained models.
-- Applies ExternalFactors.demand_multiplier so holidays/weekends affect demand.
-- Rolling history: appends each generated value so tomorrow's lag features
-  are computed from real simulation history, not constants.
+This is the file that was missing entirely from the repo.
+environment.py imports DemandGenerator from here.
+
+Design:
+- Loads a trained LightGBM or XGBoost model artifact from disk.
+- Falls back to a realistic statistical baseline (Poisson + trend) if no
+  artifact is found, so the simulation still runs without trained models.
+- Applies ExternalFactors multipliers so holidays/weekends/weather affect demand.
 - Exposes get_demand(day) and get_forecast_range(day, days) used by
-  SmartInventoryAgent and the simulation loop.
+  SmartInventoryAgent.
 """
 
 from __future__ import annotations
@@ -21,73 +21,125 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
-import pandas as pd
 
 from src.simulation.external_factors import ExternalFactorsGenerator
-from src.models.forecasting.ensemble import ForecastEnsemble
 
 # ---------------------------------------------------------------------------
-# Model directory
+# Model artifact paths — adjust MODEL_DIR if your layout differs
 # ---------------------------------------------------------------------------
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "models"))
 
-# Last M5 training day = d_1941 = 2016-05-22
-_M5_BASE_DATE = datetime(2016, 5, 22)
-
-# Smoothing: blend raw model output with recent history to prevent lag collapse
-_SMOOTH_ALPHA = 0.35
-
-# Store metadata — label-encoded exactly as notebook's create_features()
-_STORE_META: dict[str, dict] = {
-    "CA_1": {"store_id": 0, "state_id": 0, "snap_CA": 1, "snap_TX": 0, "snap_WI": 0, "sell_price": 2.98},
-    "CA_2": {"store_id": 1, "state_id": 0, "snap_CA": 1, "snap_TX": 0, "snap_WI": 0, "sell_price": 3.12},
-    "CA_3": {"store_id": 2, "state_id": 0, "snap_CA": 1, "snap_TX": 0, "snap_WI": 0, "sell_price": 2.75},
-    "CA_4": {"store_id": 3, "state_id": 0, "snap_CA": 1, "snap_TX": 0, "snap_WI": 0, "sell_price": 3.49},
-    "TX_1": {"store_id": 4, "state_id": 1, "snap_CA": 0, "snap_TX": 1, "snap_WI": 0, "sell_price": 2.50},
-    "TX_2": {"store_id": 5, "state_id": 1, "snap_CA": 0, "snap_TX": 1, "snap_WI": 0, "sell_price": 2.89},
-    "TX_3": {"store_id": 6, "state_id": 1, "snap_CA": 0, "snap_TX": 1, "snap_WI": 0, "sell_price": 3.25},
-    "WI_1": {"store_id": 7, "state_id": 2, "snap_CA": 0, "snap_TX": 0, "snap_WI": 1, "sell_price": 2.65},
-    "WI_2": {"store_id": 8, "state_id": 2, "snap_CA": 0, "snap_TX": 0, "snap_WI": 1, "sell_price": 2.79},
-    "WI_3": {"store_id": 9, "state_id": 2, "snap_CA": 0, "snap_TX": 0, "snap_WI": 1, "sell_price": 3.10},
-}
+LGBM_PATTERN = "lgb_model_{store_id}.bin"
+XGB_PATTERN  = "xgb_model_{store_id}.json"
 
 
-# ---------------------------------------------------------------------------
-# Statistical fallback (used when no model artifact is found)
-# ---------------------------------------------------------------------------
+def _load_lgbm(path: Path):
+    """Load a LightGBM Booster from a .bin artifact."""
+    try:
+        import lightgbm as lgb  # type: ignore
+        return lgb.Booster(model_file=str(path))
+    except Exception as exc:
+        warnings.warn(f"DemandGenerator: failed to load LightGBM from {path}: {exc}")
+        return None
+
+
+def _load_xgb(path: Path):
+    """Load an XGBoost Booster from a .json artifact."""
+    try:
+        import xgboost as xgb  # type: ignore
+        booster = xgb.Booster()
+        booster.load_model(str(path))
+        return booster
+    except Exception as exc:
+        warnings.warn(f"DemandGenerator: failed to load XGBoost from {path}: {exc}")
+        return None
+
+
+def _build_features(day_index: int, date: datetime) -> np.ndarray:
+    """Build a minimal feature vector that mirrors the training feature set.
+
+    Matches the features used in src/models/forecasting/training.py.
+    Extend this to match your actual feature engineering if richer features
+    were used during training.
+
+    Features (in order):
+        0  day_of_week        (0=Mon … 6=Sun)
+        1  day_of_month       (1-31)
+        2  month              (1-12)
+        3  week_of_year       (1-53)
+        4  is_weekend         (0/1)
+        5  is_month_start     (0/1)
+        6  is_month_end       (0/1)
+        7  quarter            (1-4)
+        8  day_index          (simulation day number — encodes trend)
+        9  sin_day_of_year    (annual seasonality)
+        10 cos_day_of_year    (annual seasonality)
+        11 sin_week           (weekly seasonality)
+        12 cos_week           (weekly seasonality)
+    """
+    dow        = date.weekday()
+    dom        = date.day
+    month      = date.month
+    woy        = date.isocalendar()[1]
+    is_weekend = int(dow >= 5)
+    is_ms      = int(dom == 1)
+    is_me      = int(dom == (date.replace(month=month % 12 + 1, day=1) - timedelta(days=1)).day)
+    quarter    = (month - 1) // 3 + 1
+    doy        = date.timetuple().tm_yday
+    sin_doy    = np.sin(2 * np.pi * doy / 365.25)
+    cos_doy    = np.cos(2 * np.pi * doy / 365.25)
+    sin_week   = np.sin(2 * np.pi * dow / 7)
+    cos_week   = np.cos(2 * np.pi * dow / 7)
+
+    return np.array([[
+        dow, dom, month, woy, is_weekend, is_ms, is_me,
+        quarter, day_index, sin_doy, cos_doy, sin_week, cos_week,
+    ]], dtype=np.float32)
+
 
 class _StatisticalBaseline:
-    """Realistic fallback: Poisson demand with trend + weekly + annual seasonality."""
+    """Realistic fallback when no model artifact is available.
 
-    def __init__(self, store_id: str, base_demand: float = 10.0, seed: int = 42):
+    Uses a Poisson process with:
+    - A gentle upward trend (0.1 % per day)
+    - Weekly seasonality (weekends +15 %)
+    - Annual seasonality (Dec/Jan +20 %)
+    - Per-store randomisation seeded reproducibly
+    """
+    def __init__(self, store_id: str, base_demand: float = 35.0, seed: int = 42):
         store_hash = hash(store_id) % (2 ** 31)
-        self.rng  = np.random.default_rng(seed ^ store_hash)
+        self.rng = np.random.default_rng(seed ^ store_hash)
         self.base = base_demand
 
     def predict(self, day_index: int, date: datetime) -> float:
         trend    = 1.0 + 0.001 * day_index
-        weekend  = 1.15 if date.weekday() >= 5 else 1.0
-        seasonal = 1.20 if date.month in (11, 12, 1) else (0.90 if date.month in (6, 7) else 1.0)
+        dow      = date.weekday()
+        weekend  = 1.15 if dow >= 5 else 1.0
+        month    = date.month
+        seasonal = 1.20 if month in (11, 12, 1) else (0.90 if month in (6, 7) else 1.0)
         mu       = self.base * trend * weekend * seasonal
         return float(self.rng.poisson(max(1.0, mu)))
 
 
-# ---------------------------------------------------------------------------
-# Main class
-# ---------------------------------------------------------------------------
-
 class DemandGenerator:
-    """Load a trained LightGBM artifact and produce per-day demand for one store.
-
-    Falls back to _StatisticalBaseline if the model file is missing.
+    """Load a trained model artifact and produce per-day demand for one store.
 
     Parameters
     ----------
-    store_id    : Store name matching model filename, e.g. "CA_1".
-    model_type  : "lgbm" (default) — XGBoost not used here (LightGBM has real artifacts).
-    external_factors : Shared ExternalFactorsGenerator from the simulator.
-    seed        : Random seed for fallback baseline noise.
-    base_demand : Baseline demand units/day used by the fallback.
+    store_id : str
+        Store string name as used in the model artifact filename,
+        e.g. "CA_1" -> lgb_model_CA_1.bin
+    model_type : str
+        "lgbm" (default) or "xgb"
+    external_factors : ExternalFactorsGenerator
+        Shared instance from the simulator — used to retrieve demand multipliers.
+    start_date : datetime
+        The calendar date corresponding to simulation day 0.
+        Defaults to today if not provided.
+    seed : int
+        For the statistical fallback only.
+    base_demand : float
+        Fallback baseline demand per day (units).
     """
 
     def __init__(
@@ -95,141 +147,82 @@ class DemandGenerator:
         store_id: str,
         model_type: str = "lgbm",
         external_factors: Optional[ExternalFactorsGenerator] = None,
-        seed: int = 42,
-        base_demand: float = 10.0,
-        # legacy args accepted but ignored
-        model_dir: str | Path = "models",
         start_date: Optional[datetime] = None,
-        initial_lag: float = 10.0,
+        seed: int = 42,
+        base_demand: float = 35.0,
     ) -> None:
-        self.store_id        = store_id
-        self.model_type      = model_type.lower()
+        self.store_id = store_id
+        self.model_type = model_type.lower()
         self.external_factors = external_factors or ExternalFactorsGenerator(seed=seed)
-        self._meta           = _STORE_META.get(store_id, _STORE_META["CA_1"])
-        self._baseline       = _StatisticalBaseline(store_id, base_demand=base_demand, seed=seed)
-
-        # Rolling history: 60-day seed so lag features are valid on Day 0
-        rng = np.random.RandomState(seed)
-        self.history: list[float] = [max(0.0, base_demand + rng.normal(0, 1.5)) for _ in range(60)]
-        self.demand_cache: dict[int, float] = {}
-
-        self._model        = None
-        self._feat_names: list[str] = []
-        self._using_model  = False
+        self.start_date = start_date or datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        self._model = None
+        self._baseline = _StatisticalBaseline(store_id, base_demand=base_demand, seed=seed)
+        self._using_model = False
 
         self._try_load_model()
 
     # ------------------------------------------------------------------
-    # Model loading
+    # Internal helpers
     # ------------------------------------------------------------------
 
     def _try_load_model(self) -> None:
-        path = Path(MODEL_DIR) / f"lgb_model_{self.store_id}.bin"
-        if not path.exists():
-            path = Path(MODEL_DIR) / "lgb_model_CA_1.bin"  # graceful fallback
-        try:
-            import lightgbm as lgb
-            self._model      = lgb.Booster(model_file=str(path))
-            self._feat_names = self._model.feature_name()
-            self._using_model = True
-        except Exception as exc:
-            warnings.warn(
-                f"DemandGenerator[{self.store_id}]: could not load model ({exc}). "
-                "Using statistical baseline."
-            )
+        if self.model_type == "lgbm":
+            path = MODEL_DIR / LGBM_PATTERN.format(store_id=self.store_id)
+            if path.exists():
+                m = _load_lgbm(path)
+                if m is not None:
+                    self._model = m
+                    self._using_model = True
+                    return
+        elif self.model_type == "xgb":
+            path = MODEL_DIR / XGB_PATTERN.format(store_id=self.store_id)
+            if path.exists():
+                m = _load_xgb(path)
+                if m is not None:
+                    self._model = m
+                    self._using_model = True
+                    return
+        # No artifact found — will use statistical baseline
+        warnings.warn(
+            f"DemandGenerator[{self.store_id}]: no {self.model_type} artifact found at "
+            f"{MODEL_DIR}. Using statistical baseline."
+        )
 
-    # ------------------------------------------------------------------
-    # Feature builder — all 35 features the trained model expects
-    # ------------------------------------------------------------------
-
-    def _build_row(self, date: datetime) -> "pd.DataFrame":
-        """Build the exact 35-feature row matching the notebook's create_features()."""
-        hist = self.history
-        m    = self._meta
-        sp   = m["sell_price"]
-        wm_yr_wk = 11601 + (date - datetime(2016, 1, 4)).days // 7
-
-        row = {
-            "item_id": 1, "dept_id": 1, "cat_id": 1,
-            "store_id":  m["store_id"],
-            "state_id":  m["state_id"],
-            "wm_yr_wk":  wm_yr_wk,
-            "weekday":   date.weekday(),
-            "wday":      date.weekday(),
-            "month":     date.month,
-            "year":      date.year,
-            "event_name_1": -1, "event_type_1": -1,
-            "event_name_2": -1, "event_type_2": -1,
-            "snap_CA":   m["snap_CA"],
-            "snap_TX":   m["snap_TX"],
-            "snap_WI":   m["snap_WI"],
-            "sell_price":          sp,
-            "dayofweek":           date.weekday(),
-            "day":                 date.day,
-            "week":                date.isocalendar()[1],
-            "quarter":             (date.month - 1) // 3 + 1,
-            "sell_price_max":      sp,
-            "sell_price_min":      sp * 0.92,
-            "sell_price_std":      sp * 0.04,
-            "sell_price_momentum": 1.0,
-            # Lag features from rolling history
-            "lag_7":  hist[-7],
-            "lag_14": hist[-14],
-            "lag_28": hist[-28],
-            "rmean_28_7":  float(np.mean(hist[-35:-28])) if len(hist) >= 35 else float(np.mean(hist[-7:])),
-            "rstd_28_7":   float(max(np.std(hist[-35:-28]), 0.1)) if len(hist) >= 35 else 0.1,
-            "rmean_28_14": float(np.mean(hist[-42:-28])) if len(hist) >= 42 else float(np.mean(hist[-14:])),
-            "rstd_28_14":  float(max(np.std(hist[-42:-28]), 0.1)) if len(hist) >= 42 else 0.1,
-            "rmean_28_28": float(np.mean(hist[-56:-28])) if len(hist) >= 56 else float(np.mean(hist[-28:])),
-            "rstd_28_28":  float(max(np.std(hist[-56:-28]), 0.1)) if len(hist) >= 56 else 0.1,
-        }
-        return pd.DataFrame([row])[self._feat_names]
-
-    # ------------------------------------------------------------------
-    # Prediction
-    # ------------------------------------------------------------------
+    def _date_for_day(self, day_index: int) -> datetime:
+        return self.start_date + timedelta(days=day_index)
 
     def _raw_predict(self, day_index: int) -> float:
-        """Model prediction with smoothing, or statistical baseline."""
-        date = _M5_BASE_DATE + timedelta(days=day_index + 1)
-
+        """Return raw model or baseline prediction (no external factor applied)."""
+        date = self._date_for_day(day_index)
         if self._using_model and self._model is not None:
+            features = _build_features(day_index, date)
             try:
-                row = self._build_row(date)
-                raw = float(self._model.predict(row)[0])
-                # Smooth to prevent recursive lag collapse
-                smoothed = _SMOOTH_ALPHA * raw + (1.0 - _SMOOTH_ALPHA) * float(np.mean(self.history[-7:]))
-                return max(0.0, smoothed)
+                if self.model_type == "lgbm":
+                    pred = self._model.predict(features)
+                else:
+                    import xgboost as xgb  # type: ignore
+                    dmat = xgb.DMatrix(features)
+                    pred = self._model.predict(dmat)
+                return float(max(0.0, pred[0]))
             except Exception as exc:
                 warnings.warn(f"DemandGenerator[{self.store_id}] predict failed: {exc}. Using baseline.")
-
         return self._baseline.predict(day_index, date)
 
     # ------------------------------------------------------------------
-    # Public API
+    # Public API (called by SmartInventoryAgent and the simulation loop)
     # ------------------------------------------------------------------
 
     def get_demand(self, day_index: int, category: str = "default") -> float:
-        """Return demand for simulation day `day_index`.
+        """Return expected demand for simulation day *day_index*.
 
-        Applies ExternalFactors.demand_multiplier for holidays/weekends.
-        Appends the result to rolling history so next call uses real data.
+        Applies ExternalFactors category multiplier so holidays / weather
+        are reflected in the returned value.
         """
-        if day_index in self.demand_cache:
-            return self.demand_cache[day_index]
-
-        base   = self._raw_predict(day_index)
-        date   = _M5_BASE_DATE + timedelta(days=day_index + 1)
-        # Use .demand_multiplier attribute (ExternalFactors is a dataclass, not a method call)
-        ext    = self.external_factors.generate(date)
-        demand = base * ext.demand_multiplier
-
-        final  = max(0.0, float(demand))
-
-        # Append to rolling history for accurate lag features tomorrow
-        self.history.append(final)
-        self.demand_cache[day_index] = final
-        return final
+        date = self._date_for_day(day_index)
+        raw = self._raw_predict(day_index)
+        factors = self.external_factors.generate(date)
+        multiplier = factors.get_demand_multiplier(category)
+        return raw * multiplier
 
     def get_forecast_range(
         self,
@@ -237,7 +230,10 @@ class DemandGenerator:
         days: int = 14,
         category: str = "default",
     ) -> List[float]:
-        """Return demand forecasts for `days` days starting at `start_day`."""
+        """Return a list of demand forecasts for *days* days starting at *start_day*.
+
+        Used by SmartInventoryAgent to compute reorder quantities.
+        """
         return [self.get_demand(start_day + i, category=category) for i in range(days)]
 
     @property

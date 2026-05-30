@@ -92,3 +92,4 @@ models/*.pt
 
 # Stale artifacts
 deepseek_first_given.md
+M5 CSV files/
