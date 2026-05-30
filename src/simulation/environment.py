@@ -202,7 +202,7 @@ class RetailSimulator:
                 
                 sold = min(demand, current_stock)
                 new_stock = current_stock - sold
-                daily_holding_cost += new_stock * 0.10
+                daily_holding_cost += new_stock * 0.001
                 
                 self.db_inventory[(store_id, product_id)] = new_stock
                 
@@ -225,7 +225,7 @@ class RetailSimulator:
                 waste_units=0.0, daily_profit=daily_profit
             ))
             
-            await asyncio.sleep(0.3)  # Slightly faster execution
+            await asyncio.sleep(0)  # Slightly faster execution
             
         self._flush_inventory_to_db()
         return self.get_metrics()
