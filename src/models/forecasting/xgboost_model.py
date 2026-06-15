@@ -65,7 +65,19 @@ class XGBoostForecaster:
         if not self.is_fitted or self.model is None:
             raise RuntimeError("XGBoostForecaster must be fitted before prediction")
 
-        median = np.asarray(self.model.predict(X), dtype=float)
+        import xgboost as xgb  # type: ignore
+
+        if isinstance(self.model, xgb.Booster):
+            # Native Booster requires a DMatrix; column order must match training.
+            if isinstance(X, pd.DataFrame):
+                dm = xgb.DMatrix(X, feature_names=self.feature_names or list(X.columns))
+            else:
+                dm = xgb.DMatrix(X)
+            median = np.asarray(self.model.predict(dm), dtype=float)
+        else:
+            # sklearn XGBRegressor — accepts DataFrame/ndarray directly.
+            median = np.asarray(self.model.predict(X), dtype=float)
+
         spread = max(self.residual_std, 1e-6)
         return {
             "median": median,
@@ -101,10 +113,46 @@ class XGBoostForecaster:
 
     @classmethod
     def load(cls, path: str | Path) -> "XGBoostForecaster":
-        payload = joblib.load(path)
-        model = cls(config=payload.get("config"))
-        model.model = payload["model"]
-        model.residual_std = float(payload.get("residual_std", 0.0))
-        model.feature_names = list(payload.get("feature_names", []))
-        model.is_fitted = True
-        return model
+        """Load an XGBoostForecaster from a joblib pickle **or** a native XGBoost JSON.
+
+        Format detection
+        ----------------
+        - Native XGBoost JSON (saved via ``booster.save_model(path)``): first byte is
+          ``0x7B`` (``{``).  Loaded with ``xgb.Booster().load_model()``.
+        - joblib pickle (saved via ``XGBoostForecaster.save()``): first byte is
+          ``0x80`` (pickle PROTO opcode).  Loaded with ``joblib.load()``.
+        """
+        import xgboost as xgb  # type: ignore
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"XGBoost artifact not found: {path}")
+
+        first_byte = path.read_bytes()[0]
+
+        # --- Native XGBoost JSON (0x7B = '{') ---
+        if first_byte == 0x7B:
+            booster = xgb.Booster()
+            booster.load_model(str(path))
+            obj = cls()
+            obj.model = booster
+            obj.feature_names = list(booster.feature_names or [])
+            obj.residual_std = 0.0   # not stored in native format; intervals use fallback
+            obj.is_fitted = True
+            return obj
+
+        # --- joblib pickle (0x80 = pickle PROTO opcode) ---
+        try:
+            payload = joblib.load(path)
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to load XGBoost artifact from {path}: "
+                f"not a native JSON file and joblib.load() raised {exc}"
+            ) from exc
+
+        obj = cls(config=payload.get("config"))
+        obj.model = payload["model"]
+        obj.residual_std = float(payload.get("residual_std", 0.0))
+        obj.feature_names = list(payload.get("feature_names", []))
+        obj.is_fitted = True
+        return obj

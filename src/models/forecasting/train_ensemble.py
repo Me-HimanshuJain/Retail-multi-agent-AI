@@ -11,7 +11,7 @@ import lightgbm as lgb
 import numpy as np
 
 from .ensemble import ForecastEnsemble
-from .lgbm_io import load_lgbm_booster
+from .lgbm_io import align_features_to_model, align_features_to_xgb, load_lgbm_booster
 from .m5_data import filter_store_sales, load_m5_dataset
 from .training import build_feature_columns, engineer_features, melt_sales_frame, split_train_validation
 from .wrmsse import WRMSSEEvaluator
@@ -44,10 +44,16 @@ def main() -> None:
     lgbm = load_lgbm_booster(args.lgbm_model)
     xgb = XGBoostForecaster.load(Path(args.xgb_model))
 
+    # Build feature-aligned views for each model.
+    # Each model stores the authoritative feature list it was trained on;
+    # the current pipeline may produce different/extra columns.
+    lgbm_val = align_features_to_model(validation_frame, lgbm)
+    xgb_val  = align_features_to_xgb(validation_frame, xgb.feature_names) if xgb.feature_names else validation_frame
+
     # Generate validation predictions
     val = validation_frame[["id", "d_num", "sales"]].copy()
-    val["lgbm_pred"] = lgbm.predict(validation_frame[feature_columns])
-    val["xgb_pred"] = xgb.predict(validation_frame[feature_columns])["median"]
+    val["lgbm_pred"] = lgbm.predict(lgbm_val)
+    val["xgb_pred"] = xgb.predict(xgb_val)["median"]
     
     # Create ensemble
     ensemble = ForecastEnsemble(models={"lgbm": lgbm, "xgb": xgb})
