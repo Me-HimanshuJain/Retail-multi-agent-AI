@@ -7,9 +7,10 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from src.api.auth import User, any_authenticated
 from src.models.forecasting.lgbm_io import load_lgbm_booster
 from src.models.forecasting.xgboost_model import XGBoostForecaster
 from src.models.forecasting.ensemble import ForecastEnsemble
@@ -58,14 +59,17 @@ def _load_ensemble(store: str) -> ForecastEnsemble:
 @router.get("/health")
 def forecast_health() -> dict:
     return {
-        "xgb_model_exists": (Path("models") / "xgb_model_CA_1.bin").exists(),
+        "xgb_model_exists": (Path("models") / "xgb_model_CA_1.json").exists(),
         "lgbm_model_exists": (Path("models") / "lgb_model_CA_1.bin").exists(),
         "ensemble_model_exists": (Path("models") / "ensemble_CA_1.bin").exists(),
     }
 
 
 @router.post("/predict", response_model=ForecastResponse)
-def predict_forecast(request: ForecastRequest) -> ForecastResponse:
+def predict_forecast(
+    request: ForecastRequest,
+    _current_user: User = Depends(any_authenticated),
+) -> ForecastResponse:
     frame = pd.DataFrame([request.features])
 
     store = request.store

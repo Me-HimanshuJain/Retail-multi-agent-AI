@@ -6,9 +6,10 @@ import asyncio
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from src.api.auth import User, any_authenticated, operator_required
 from src.simulation.environment import RetailSimulator
 
 router = APIRouter(prefix="/simulation", tags=["Simulation"])
@@ -58,8 +59,11 @@ async def _run_simulation_task(sim: RetailSimulator, days: int) -> None:
 
 
 @router.post("/start")
-async def start_simulation(request: SimulationStartRequest) -> SimulationStartResponse:
-    """Start a new simulation. Auth removed for dashboard access — add back for production."""
+async def start_simulation(
+    request: SimulationStartRequest,
+    _current_user: User = Depends(operator_required),
+) -> SimulationStartResponse:
+    """Start a new simulation. Requires operator or admin role."""
     global _current_simulation
 
     sim_id = str(uuid4())
@@ -76,12 +80,18 @@ async def start_simulation(request: SimulationStartRequest) -> SimulationStartRe
 
 
 @router.get("/status")
-async def get_simulation_status() -> SimulationStatus:
+async def get_simulation_status(
+    _current_user: User = Depends(any_authenticated),
+) -> SimulationStatus:
+    """Get current simulation status. Requires authentication."""
     return SimulationStatus(**_simulation_status)
 
 
 @router.get("/metrics")
-async def get_simulation_metrics() -> SimulationMetrics:
+async def get_simulation_metrics(
+    _current_user: User = Depends(any_authenticated),
+) -> SimulationMetrics:
+    """Get current simulation metrics. Requires authentication."""
     if _current_simulation is None:
         raise HTTPException(status_code=404, detail="No simulation has been started yet.")
 
@@ -99,10 +109,14 @@ async def get_simulation_metrics() -> SimulationMetrics:
 
 
 @router.post("/disrupt")
-async def inject_disruption(request: DisruptionRequest) -> dict:
+async def inject_disruption(
+    request: DisruptionRequest,
+    _current_user: User = Depends(operator_required),
+) -> dict:
+    """Inject a disruption into the running simulation. Requires operator or admin role."""
     global _current_simulation
     if not _current_simulation:
         raise HTTPException(status_code=400, detail="No active simulation running.")
-    
+
     _current_simulation.inject_disruption(request.type, request.severity)
     return {"status": "injected", "type": request.type, "severity": request.severity}

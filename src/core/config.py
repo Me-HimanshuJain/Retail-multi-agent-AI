@@ -27,8 +27,27 @@ class Settings:
     MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
     MLFLOW_EXPERIMENT_NAME: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "retail_multi_agent")
 
+    def __post_init__(self) -> None:
+        if self.SECRET_KEY == "change-me":
+            raise RuntimeError(
+                "\n\n"
+                "  ╔══════════════════════════════════════════════════════════╗\n"
+                "  ║  SECURITY ERROR: Insecure SECRET_KEY detected            ║\n"
+                "  ║                                                          ║\n"
+                "  ║  SECRET_KEY is set to the default value 'change-me'.    ║\n"
+                "  ║  This key is publicly known and must never be used.     ║\n"
+                "  ║                                                          ║\n"
+                "  ║  Generate a secure key:                                  ║\n"
+                "  ║    python -c \"import secrets; print(secrets.token_hex(32))\" ║\n"
+                "  ║                                                          ║\n"
+                "  ║  Then set it in your .env file:                         ║\n"
+                "  ║    SECRET_KEY=<generated-value>                          ║\n"
+                "  ╚══════════════════════════════════════════════════════════╝\n"
+            )
+
 
 settings = Settings()
+
 
 
 def _load_yaml_config() -> Dict[str, Any]:
