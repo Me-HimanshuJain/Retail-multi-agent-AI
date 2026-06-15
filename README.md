@@ -1,7 +1,7 @@
 # Retail Multi-Agent AI
 
-[![CI](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/ci.yml)
-[![Docker](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml/badge.svg)](https://github.com/your-org/retail-multi-agent-ai/actions/workflows/docker.yml)
+[![CI](https://github.com/Me-HimanshuJain/Retail-multi-agent-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Me-HimanshuJain/Retail-multi-agent-AI/actions/workflows/ci.yml)
+[![Docker](https://github.com/Me-HimanshuJain/Retail-multi-agent-AI/actions/workflows/docker.yml/badge.svg)](https://github.com/Me-HimanshuJain/Retail-multi-agent-AI/actions/workflows/docker.yml)
 [![Coverage](https://img.shields.io/badge/coverage-84%25-brightgreen)](PUBLIC_RELEASE_SCORE.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -46,7 +46,7 @@ retail-multi-agent-ai/
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-org/retail-multi-agent-ai.git
+git clone https://github.com/Me-HimanshuJain/Retail-multi-agent-AI.git
 cd retail-multi-agent-ai
 python -m venv .venv
 .venv\Scripts\activate
