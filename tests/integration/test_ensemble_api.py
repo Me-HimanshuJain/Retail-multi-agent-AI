@@ -46,6 +46,10 @@ def _get_xgb_feature_sample(store: str) -> dict:
 
 def test_forecast_ensemble_endpoint_ca1():
     store = "CA_1"
+    
+    if not (Path("models") / f"ensemble_{store}.bin").exists():
+        pytest.skip(f"Missing ensemble model for {store}")
+        
     # Prefer XGBoost features when available because ensemble members may expect full feature set
     features = _get_xgb_feature_sample(store) or _get_lgb_feature_sample(store)
     payload = {"features": features, "horizon": 1, "model": "ensemble", "store": store}
