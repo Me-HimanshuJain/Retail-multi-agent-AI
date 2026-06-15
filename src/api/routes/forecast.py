@@ -5,14 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List
 
-import joblib
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from lightgbm import Booster
-from lightgbm.basic import LightGBMError
 
+from src.models.forecasting.lgbm_io import load_lgbm_booster
 from src.models.forecasting.xgboost_model import XGBoostForecaster
 from src.models.forecasting.ensemble import ForecastEnsemble
 
@@ -45,9 +43,9 @@ def _load_lgb_model(store: str) -> object:
     if not model_path.exists():
         raise HTTPException(status_code=404, detail=f"LightGBM model artifact not found at {model_path}")
     try:
-        return Booster(model_file=str(model_path))
-    except LightGBMError:
-        return joblib.load(model_path)
+        return load_lgbm_booster(model_path)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _load_ensemble(store: str) -> ForecastEnsemble:

@@ -79,8 +79,8 @@ def _build_row(store_id: str, date: datetime, lag_hist: list[float],
 def _run_forecast(store_id: str, horizon: int, base_demand: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run recursive forecast for `horizon` days using LightGBM + XGBoost + Ensemble."""
     try:
-        import lightgbm as lgb
-        lgb_model = lgb.Booster(model_file=f"models/lgb_model_{store_id}.bin")
+        from src.models.forecasting.lgbm_io import load_lgbm_booster
+        lgb_model = load_lgbm_booster(f"models/lgb_model_{store_id}.bin")
         feat_names = lgb_model.feature_name()
     except Exception as exc:
         st.error(f"Could not load LightGBM model for {store_id}: {exc}")

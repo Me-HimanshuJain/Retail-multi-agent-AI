@@ -101,10 +101,14 @@ def _load_warmstart_buffer(store_id: str) -> Optional[Deque[float]]:
 # ---------------------------------------------------------------------------
 
 def _load_lgbm(path: Path):
-    """Load a LightGBM Booster from a .bin artifact."""
+    """Load a LightGBM Booster from a .bin artifact.
+
+    Delegates to ``load_lgbm_booster`` which transparently handles both
+    native ``save_model`` text files and joblib-serialised Booster pickles.
+    """
     try:
-        import lightgbm as lgb  # type: ignore
-        return lgb.Booster(model_file=str(path))
+        from src.models.forecasting.lgbm_io import load_lgbm_booster
+        return load_lgbm_booster(path)
     except Exception as exc:
         warnings.warn(f"DemandGenerator: failed to load LightGBM from {path}: {exc}")
         return None

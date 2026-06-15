@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import joblib
 import json
 import time
 from pathlib import Path
@@ -50,7 +51,8 @@ def main() -> None:
     )
     model_path = Path(args.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    model.booster_.save_model(str(model_path))
+    # Save as joblib Booster (consistent with existing .bin artifacts in models/)
+    joblib.dump(model.booster_, model_path)
 
     wrmsse = WRMSSEEvaluator(train_long=long_sales, weights=dataset.weights_validation)
     pred_long = validation_frame[["id", "d_num"]].copy()

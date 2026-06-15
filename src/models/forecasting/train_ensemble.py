@@ -11,6 +11,7 @@ import lightgbm as lgb
 import numpy as np
 
 from .ensemble import ForecastEnsemble
+from .lgbm_io import load_lgbm_booster
 from .m5_data import filter_store_sales, load_m5_dataset
 from .training import build_feature_columns, engineer_features, melt_sales_frame, split_train_validation
 from .wrmsse import WRMSSEEvaluator
@@ -40,7 +41,7 @@ def main() -> None:
     _, validation_frame = split_train_validation(feature_frame, validation_days=28)
 
     # Load trained models
-    lgbm = lgb.Booster(model_file=str(Path(args.lgbm_model)))
+    lgbm = load_lgbm_booster(args.lgbm_model)
     xgb = XGBoostForecaster.load(Path(args.xgb_model))
 
     # Generate validation predictions
