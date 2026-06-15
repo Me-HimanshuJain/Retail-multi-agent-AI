@@ -1,0 +1,10 @@
+{
+  "lgbm_wrmsse": 148.07512975797047,
+  "xgb_wrmsse": 12650.282690060172,
+  "ensemble_wrmsse": 110.00861479898299,
+  "weights": {
+    "lgbm": 0.99,
+    "xgb": 0.01
+  },
+  "training_time_sec": 17.610943500010762
+}
