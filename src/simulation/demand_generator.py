@@ -566,6 +566,10 @@ class DemandGenerator:
         self.store_id         = store_id
         self.model_type       = model_type.lower()
         self.external_factors = external_factors or ExternalFactorsGenerator(seed=seed)
+        
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date)
+            
         self.start_date       = start_date or datetime.now().replace(
             hour=0, minute=0, second=0, microsecond=0
         )

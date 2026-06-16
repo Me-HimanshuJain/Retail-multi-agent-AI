@@ -137,6 +137,8 @@ class RetailSimulator:
     start_date: Optional[datetime] = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.start_date, str):
+            self.start_date = datetime.fromisoformat(self.start_date)
         self.start_date = self.start_date or datetime.now().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
