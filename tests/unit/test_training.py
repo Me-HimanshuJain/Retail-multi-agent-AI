@@ -133,3 +133,60 @@ def test_build_wrmsse_evaluator():
     weights = pd.DataFrame({"id": ["A", "B"], "weight": [0.5, 0.5]})
     evaluator = build_wrmsse_evaluator(long_frame, weights)
     assert evaluator is not None
+
+from unittest.mock import patch, MagicMock
+
+def test_optuna_lgbm_params_with_trials():
+    # Run _optuna_lgbm_params
+    train_x = pd.DataFrame({"f1": [1, 2, 3, 4, 5], "f2": [4, 5, 6, 7, 8]})
+    train_y = pd.Series([10, 20, 30, 40, 50])
+    validation_x = pd.DataFrame({"f1": [1, 2], "f2": [4, 5]})
+    validation_y = pd.Series([10, 20])
+    
+    # Actually run 1 trial to cover the objective function
+    params = _optuna_lgbm_params(train_x, train_y, validation_x, validation_y, n_trials=1)
+    
+    assert "learning_rate" in params
+    assert "num_leaves" in params
+    assert params["n_estimators"] == 1200
+
+@patch("src.models.forecasting.training.load_m5_bundle")
+@patch("src.models.forecasting.training.train_lightgbm_model")
+@patch("src.models.forecasting.training.train_xgboost_model")
+@patch("src.models.forecasting.training.train_prophet_model")
+@patch("src.models.forecasting.training.build_wrmsse_evaluator")
+def test_train_forecasting_workflow(mock_wrmsse, mock_prophet, mock_xgb, mock_lgbm, mock_load):
+    # Mock data bundle
+    mock_bundle = MagicMock()
+    mock_bundle.sales = pd.DataFrame({"id": ["A", "B"], "item_id": [1, 2], "dept_id": [1, 1], "cat_id": [1, 1], "store_id": [1, 1], "state_id": [1, 1], "d_1": [10, 20], "d_2": [15, 25]})
+    mock_bundle.calendar = pd.DataFrame({"d": ["d_1", "d_2"], "wm_yr_wk": ["2020-01-01", "2020-01-02"]})
+    mock_bundle.prices = pd.DataFrame({"store_id": [1, 1], "item_id": [1, 2], "wm_yr_wk": ["2020-01-01", "2020-01-02"], "sell_price": [1.99, 2.99]})
+    mock_bundle.weights = pd.DataFrame({"id": ["A", "B"], "weight": [0.5, 0.5]})
+    mock_load.return_value = mock_bundle
+    
+    # Mock models
+    mock_lgbm_model = MagicMock()
+    mock_lgbm_model.predict.return_value = np.array([12.0, 22.0])
+    mock_lgbm.return_value = (mock_lgbm_model, {"rmse": 1.5})
+    
+    mock_xgb_model = MagicMock()
+    mock_xgb_model.predict.return_value = pd.DataFrame({"median": [11.0, 21.0]})
+    mock_xgb.return_value = (mock_xgb_model, {"rmse": 1.2})
+    
+    mock_prophet.return_value = MagicMock()
+    
+    mock_evaluator = MagicMock()
+    mock_evaluator.score.return_value = 0.8
+    mock_wrmsse.return_value = mock_evaluator
+    
+    from src.models.forecasting.training import train_forecasting_workflow
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        results = train_forecasting_workflow("dummy_data_dir", tmpdir, validation_days=1, n_trials=0)
+        
+        assert "lgbm" in results
+        assert "xgb" in results
+        assert results["lgbm"]["wrmsse"] == 0.8
+        assert results["lgbm"]["rmse"] == 1.5
+        assert results["xgb"]["rmse"] == 1.2

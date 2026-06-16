@@ -172,12 +172,44 @@ class SimulationRunMetrics:
     stockout_rate: float = 0.0          # fraction of days where any stockout occurred
     service_level: float = 0.0          # fraction of total demand that was met
     avg_waste_units: float = 0.0
+    waste_rate: float = 0.0             # waste units per day / average stock
     total_waste_units: float = 0.0
+    total_lost_sales: float = 0.0
     on_time_delivery_rate: float = 0.0  # computed from actual shipment records, not hardcoded
     inventory_turnover: float = 0.0     # total_sold / avg_inventory_level (if tracked)
     days_simulated: int = 0
 
-
+    @classmethod
+    def from_daily(cls, daily_metrics: List[SimulationDailyMetrics], on_time_rate: float) -> "SimulationRunMetrics":
+        if not daily_metrics:
+            return cls()
+        
+        days = len(daily_metrics)
+        total_revenue = sum(m.total_revenue for m in daily_metrics)
+        total_profit = sum(m.daily_profit for m in daily_metrics)
+        avg_fill_rate = sum(m.fill_rate for m in daily_metrics) / days
+        stockout_days = sum(1 for m in daily_metrics if m.stockout_occurred)
+        stockout_rate = stockout_days / days
+        total_demand = sum(m.total_demand for m in daily_metrics)
+        total_sold = sum(m.total_sold for m in daily_metrics)
+        service_level = (total_sold / total_demand) if total_demand > 0 else 1.0
+        total_waste = sum(m.waste_units for m in daily_metrics)
+        avg_waste = total_waste / days
+        total_lost = sum(m.total_lost_sales for m in daily_metrics)
+        
+        return cls(
+            total_revenue=total_revenue,
+            total_profit=total_profit,
+            avg_fill_rate=avg_fill_rate,
+            stockout_rate=stockout_rate,
+            service_level=service_level,
+            avg_waste_units=avg_waste,
+            waste_rate=total_waste / max(total_sold + total_waste, 1.0),
+            total_waste_units=total_waste,
+            total_lost_sales=total_lost,
+            on_time_delivery_rate=on_time_rate,
+            days_simulated=days
+        )
 @dataclass
 class SimulationState:
     """

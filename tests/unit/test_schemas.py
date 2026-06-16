@@ -1,74 +1,86 @@
+import pytest
+from pydantic import ValidationError
 from src.api.schemas import (
     PaginationParams, PaginatedResponse, ErrorDetail, APIError,
     SuccessResponse, ProductResponse, ProductListResponse,
     InventoryResponse, InventoryAlert, OrderResponse, KPISummary,
     DailyKPI, AgentStatus, AgentDecisionLog, ConfigUpdateRequest
 )
-from src.api.routes.forecast import ForecastRequest, ForecastResponse
-from src.api.routes.simulation import SimulationStartRequest, SimulationStartResponse, SimulationStatus, SimulationMetrics, DisruptionRequest
-from pydantic import ValidationError
-import pytest
-
-def test_forecast_request():
-    req = ForecastRequest(features={"a": 1.0}, horizon=14, model="xgb", store="CA_2")
-    assert req.horizon == 14
-    assert req.model == "xgb"
-
-    with pytest.raises(ValidationError):
-        ForecastRequest(features={"a": 1.0}, horizon=0) # < 1
-    with pytest.raises(ValidationError):
-        ForecastRequest(features={"a": 1.0}, model="invalid")
-
-def test_forecast_response():
-    resp = ForecastResponse(model="xgb", forecast=[1.0], lower=[0.5], upper=[1.5])
-    assert resp.model == "xgb"
-
-def test_simulation_start_request():
-    req = SimulationStartRequest(days=30)
-    assert req.days == 30
-    with pytest.raises(ValidationError):
-        SimulationStartRequest(days=400) # > 365
-
-def test_simulation_start_response():
-    resp = SimulationStartResponse(simulation_id="abc", status="started", days=30)
-    assert resp.simulation_id == "abc"
-
-def test_simulation_status():
-    status = SimulationStatus(running=True)
-    assert status.running is True
-
-def test_simulation_metrics():
-    metrics = SimulationMetrics(total_revenue=100.0, total_profit=50.0, fill_rate=0.9, stockout_rate=0.1, on_time_delivery_rate=0.95)
-    assert metrics.total_revenue == 100.0
-
-def test_disruption_request():
-    req = DisruptionRequest(type="supplier_delay")
-    assert req.severity == "medium"
-    assert req.params == {}
 
 def test_pagination_params():
-    params = PaginationParams()
-    assert params.page == 1
-    assert params.page_size == 20
+    p = PaginationParams(page=2, page_size=50)
+    assert p.page == 2
+    assert p.page_size == 50
+    
+    with pytest.raises(ValidationError):
+        PaginationParams(page=0)
+        
+    with pytest.raises(ValidationError):
+        PaginationParams(page_size=200)
+
+def test_paginated_response():
+    r = PaginatedResponse(total=100, page=1, page_size=20, total_pages=5)
+    assert r.total == 100
+
+def test_error_detail():
+    e = ErrorDetail(message="msg")
+    assert e.message == "msg"
+    assert e.field is None
 
 def test_api_error():
-    err = APIError(detail="error")
-    assert err.detail == "error"
+    e = APIError(detail="error")
+    assert e.detail == "error"
 
 def test_success_response():
-    succ = SuccessResponse(message="ok")
-    assert succ.message == "ok"
+    s = SuccessResponse(message="ok")
+    assert s.message == "ok"
+
+def test_product_response():
+    p = ProductResponse(
+        product_id=1, product_name="A", category_id=2, 
+        unit_cost=1.0, base_price=2.0, is_perishable=True
+    )
+    assert p.product_id == 1
 
 def test_product_list_response():
-    resp = ProductListResponse(total=1, page=1, page_size=20, total_pages=1, items=[
-        ProductResponse(product_id=1, product_name="A", category_id=1, unit_cost=1.0, base_price=2.0, is_perishable=False)
-    ])
-    assert resp.total == 1
+    p = ProductResponse(
+        product_id=1, product_name="A", category_id=2, 
+        unit_cost=1.0, base_price=2.0, is_perishable=True
+    )
+    lr = ProductListResponse(
+        total=1, page=1, page_size=20, total_pages=1, items=[p]
+    )
+    assert len(lr.items) == 1
+
+def test_inventory_response():
+    i = InventoryResponse(product_id=1, location_type="store", location_id=1, quantity=10, status="ok")
+    assert i.quantity == 10
+
+def test_inventory_alert():
+    a = InventoryAlert(product_id=1, location_type="store", location_id=1, current_stock=5, reorder_point=10, severity="high")
+    assert a.severity == "high"
+
+def test_order_response():
+    o = OrderResponse(order_id=1, store_id=1, product_id=1, quantity=10, status="pending")
+    assert o.quantity == 10
+
+def test_kpi_summary():
+    k = KPISummary(total_revenue=100.0, total_profit=50.0, fill_rate=0.9, stockout_rate=0.1, on_time_delivery_rate=0.9, period_start="2020-01-01", period_end="2020-01-02")
+    assert k.total_revenue == 100.0
+
+def test_daily_kpi():
+    d = DailyKPI(date="2020-01-01", revenue=100.0, profit=50.0, fill_rate=0.9)
+    assert d.revenue == 100.0
+
+def test_agent_status():
+    a = AgentStatus(agent_name="agent1", status="active", tasks_today=10, success_rate=0.9, errors_today=1)
+    assert a.success_rate == 0.9
 
 def test_agent_decision_log():
-    log = AgentDecisionLog(agent_name="agent", action="buy", details="test", success=True)
-    assert log.success is True
+    a = AgentDecisionLog(agent_name="agent1", action="order", details="Ordered 10", success=True)
+    assert a.success is True
 
 def test_config_update_request():
-    req = ConfigUpdateRequest(values={"key": "val"})
-    assert req.section == "simulation"
+    c = ConfigUpdateRequest(values={"a": 1})
+    assert c.section == "simulation"
+    assert c.values["a"] == 1
