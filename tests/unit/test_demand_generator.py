@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import MagicMock
 from src.simulation.demand_generator import DemandGenerator
 
 from unittest.mock import patch
@@ -32,6 +33,33 @@ def test_missing_warmstart_file(caplog):
         assert "warmstart file not found" in caplog.text.lower() or True # Adjust based on actual warning
         # Since it falls back, we can just check it runs
         assert g is not None
+
+def test_missing_xgb_features():
+    from src.simulation.demand_generator import DemandGenerator
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("src.simulation.demand_generator._load_xgb_model", return_value=MagicMock()):
+            with patch("builtins.open", side_effect=FileNotFoundError):
+                g = DemandGenerator("CA_1", model_type="xgb")
+                assert g.using_trained_model is False
+
+def test_demand_generator_predict_exception():
+    from src.simulation.demand_generator import DemandGenerator
+    # test lines 697-698
+    g = DemandGenerator("CA_1", model_type="xgb")
+    g._using_model = True
+    g._model = MagicMock()
+    g._model.predict.side_effect = Exception("prediction failed")
+    demand = g.get_demand(0) # Should hit except block and fallback to statistical baseline
+    assert isinstance(demand, float)
+
+def test_demand_generator_build_lgbm_features():
+    from src.simulation.demand_generator import _build_lgbm_features
+    from datetime import datetime
+    date = datetime(2020, 1, 1) # Wednesday, Jan 1
+    features = _build_lgbm_features(0, date)
+    assert features.shape == (1, 13)
+    assert features[0][0] == 2 # dow
+    assert features[0][1] == 1 # dom
 
 def test_missing_xgb_model(caplog):
     with patch("src.simulation.demand_generator.DemandGenerator._try_load_model", return_value=False):

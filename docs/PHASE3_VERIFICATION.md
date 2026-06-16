@@ -324,9 +324,9 @@ Authenticated requests successfully passed authorization checks.
 
 ```text
 ===================================================
-51 passed
-0 failed
-0 skipped
+Tests Passed : 50
+Tests Failed : 0
+Tests Skipped: 1
 ===================================================
 ```
 
