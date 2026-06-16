@@ -63,7 +63,7 @@ def test_compute_metric_bundle():
 from src.models.forecasting.training import engineer_features, prepare_prophet_data, _optuna_lgbm_params
 
 def test_engineer_features():
-    long_frame = pd.DataFrame({"d": ["d_1", "d_2"], "store_id": [1, 1], "item_id": [1, 1]})
+    long_frame = pd.DataFrame({"id": ["item_1_store_1", "item_1_store_1"], "d_num": [1, 2], "d": ["d_1", "d_2"], "store_id": [1, 1], "item_id": [1, 1], "sales": [10, 15]})
     calendar_df = pd.DataFrame({"d": ["d_1", "d_2"], "wm_yr_wk": ["2020-01-01", "2020-01-02"]})
     prices_df = pd.DataFrame({"store_id": [1, 1], "item_id": [1, 1], "wm_yr_wk": ["2020-01-01", "2020-01-02"], "sell_price": [1.99, 1.99]})
     
