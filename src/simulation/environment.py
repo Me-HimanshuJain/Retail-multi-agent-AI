@@ -133,7 +133,7 @@ class SmartInventoryAgent:
 @dataclass
 class RetailSimulator:
     seed: int = 42
-    model_type: str = "lgbm"
+    model_type: str = "xgb"
     start_date: Optional[datetime] = None
 
     def __post_init__(self) -> None:

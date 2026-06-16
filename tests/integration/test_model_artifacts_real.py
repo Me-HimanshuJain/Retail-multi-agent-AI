@@ -45,7 +45,7 @@ def test_ca1_metrics_json_has_required_fields() -> None:
 
 
 def test_xgb_artifact_loads_and_predicts() -> None:
-    model_path = Path("models") / "xgb_model_CA_1.bin"
+    model_path = Path("models") / "xgb_model_CA_1.json"
     if not model_path.exists():
         pytest.skip(f"Missing artifact: {model_path}")
 

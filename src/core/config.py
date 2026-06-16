@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from dotenv import load_dotenv
 
+load_dotenv()
 
 @dataclass
 class Settings:

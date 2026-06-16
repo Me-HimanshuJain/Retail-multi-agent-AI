@@ -1,8 +1,26 @@
-from src.api.main import get_real_ip
 from fastapi import Request
+from src.api.limiter import get_real_ip
 
-req = Request({'type': 'http', 'headers': [(b'x-forwarded-for', b'1.2.3.4')], 'client': ('testclient', 50000)})
-print("with header:", get_real_ip(req))
 
-req2 = Request({'type': 'http', 'headers': [], 'client': ('testclient', 50000)})
-print("without header:", get_real_ip(req2))
+def test_get_real_ip_forwarded():
+    req = Request(
+        {
+            "type": "http",
+            "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+            "client": ("testclient", 50000),
+        }
+    )
+
+    assert get_real_ip(req) == "1.2.3.4"
+
+
+def test_get_real_ip_client():
+    req = Request(
+        {
+            "type": "http",
+            "headers": [],
+            "client": ("127.0.0.1", 50000),
+        }
+    )
+
+    assert get_real_ip(req) == "127.0.0.1"

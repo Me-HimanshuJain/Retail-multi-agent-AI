@@ -59,12 +59,18 @@ XGB_STORE_IDS = (
 # Warm-start loader
 # ---------------------------------------------------------------------------
 
-def _load_warmstart_buffer(store_id: str) -> Optional[Deque[float]]:
-    """Load the last 28 days of real M5 daily sales for *store_id*.
+# Buffer size: 56 days of history are needed to compute rmean_28_28
+# (rolling mean of 28 values over the lag-28 series requires sales from
+# t-28 back to t-55, i.e. 56 days total).
+_BUFFER_MAXLEN = 56
 
-    Returns a deque(maxlen=28) seeded with real historical values so that
-    lag_7, lag_14, lag_28, rolling_mean_*, and rolling_std_* features start
-    with accurate numbers instead of zeros.
+
+def _load_warmstart_buffer(store_id: str) -> Optional[Deque[float]]:
+    """Load the last 56 days of real M5 daily sales for *store_id*.
+
+    Returns a deque(maxlen=56) seeded with real historical values so that
+    lag_7, lag_14, lag_28, and the rolling statistics (rmean_28_*, rstd_28_*,
+    rmean_7_*, rstd_7_*) start with accurate numbers instead of zeros.
 
     Returns None (with a warning) if the warm-start file is missing, so the
     caller can fall back to the statistical baseline seed.
@@ -86,8 +92,9 @@ def _load_warmstart_buffer(store_id: str) -> Optional[Deque[float]]:
                 f"file. Known stores: {list(data.keys())}"
             )
             return None
-        buf: Deque[float] = deque(maxlen=28)
-        buf.extend(float(v) for v in store_data[-28:])
+        buf: Deque[float] = deque(maxlen=_BUFFER_MAXLEN)
+        # Take up to 56 entries; fall back to however many are available
+        buf.extend(float(v) for v in store_data[-_BUFFER_MAXLEN:])
         return buf
     except Exception as exc:
         warnings.warn(
@@ -142,13 +149,27 @@ def _load_xgb_features(store_id: str) -> Optional[List[str]]:
         return None
     try:
         with open(path, "r", encoding="utf-8") as fh:
-            features = json.load(fh)
+            payload = json.load(fh)
+
+        # New format:
+        # {
+        #   "features": [...],
+        #   "n_features": 40
+        # }
+        if isinstance(payload, dict):
+            features = payload.get("features")
+
+        # Old format:
+        # ["feature1", "feature2"]
+        else:
+            features = payload
+
         if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
             warnings.warn(
-                f"DemandGenerator[{store_id}]: {path} must contain a JSON "
-                f"array of strings."
+                f"DemandGenerator[{store_id}]: {path} contains invalid feature metadata."
             )
             return None
+
         return features
     except Exception as exc:
         warnings.warn(
@@ -201,6 +222,16 @@ def _build_lgbm_features(day_index: int, date: datetime) -> np.ndarray:
     ]], dtype=np.float32)
 
 
+def _safe_mean(arr: list) -> float:
+    """Mean of *arr*, returning 0.0 for empty lists."""
+    return float(np.mean(arr)) if arr else 0.0
+
+
+def _safe_std(arr: list) -> float:
+    """Population std of *arr*, returning 0.0 for fewer than 2 values."""
+    return float(np.std(arr)) if len(arr) > 1 else 0.0
+
+
 def _build_xgb_row(
     day_index: int,
     date: datetime,
@@ -210,9 +241,39 @@ def _build_xgb_row(
     """Build an XGBoost DMatrix row using the exact feature order from training.
 
     Lag and rolling features are computed from *sales_buffer*, which is a
-    deque(maxlen=28) of the last 28 days of actual/predicted store-level
+    deque(maxlen=56) of the last 56 days of actual/predicted store-level
     daily sales.  On simulation day 0 this is seeded from real M5 data, so
     the model sees realistic numbers from the very first prediction.
+
+    Rolling statistic semantics (matching training.py)
+    --------------------------------------------------
+    training.py computes::
+
+        lag_base = frame.groupby("id")["sales"].shift(28)
+        rmean_28_W = lag_base.groupby(frame["id"]).transform(
+            lambda s: s.rolling(W).mean()
+        )
+
+    At prediction time *t* (today), the buffer holds sales from
+    ``t-56`` through ``t-1``.  ``buf[i]`` maps to ``sales(t - 56 + i)``.
+
+    ``lag_base[t-k] = sales[(t-k) - 28] = sales[t - k - 28]``
+
+    ``rmean_28_W[t]`` = ``mean(lag_base[t], lag_base[t-1], ..., lag_base[t-W+1])``
+                      = ``mean(sales[t-28], sales[t-29], ..., sales[t-27-W])``
+
+    In buffer indices (where ``buf[i] = sales(t - 56 + i)``):
+
+        ``sales[t - 28]``     → ``buf[28]``
+        ``sales[t - 27 - W]`` → ``buf[29 - W]``
+
+    So ``rmean_28_W = mean(buf[29-W : 29])``  (W values, right-exclusive).
+
+    Similarly for ``rmean_7_W``::
+
+        lag_base_7[t-k] = sales[(t-k) - 7]
+        rmean_7_W = mean(sales[t-7], sales[t-8], ..., sales[t-6-W])
+                  = mean(buf[50-W : 50])
 
     Parameters
     ----------
@@ -223,7 +284,7 @@ def _build_xgb_row(
     feature_names : list[str]
         Ordered list from xgb_features_{store_id}.json.
     sales_buffer : deque[float]
-        Rolling window of the last 28 days of store sales.
+        Rolling window of the last 56 days of store sales.
         Must contain at least 28 entries (guaranteed after warm-start).
 
     Returns
@@ -245,35 +306,103 @@ def _build_xgb_row(
     # ---- lag features from rolling buffer ----
     # Buffer stores days oldest→newest; index [-1] = yesterday.
     buf = list(sales_buffer)   # snapshot — do not mutate here
-    lag_1  = buf[-1]  if len(buf) >= 1  else 0.0
-    lag_7  = buf[-7]  if len(buf) >= 7  else 0.0
-    lag_14 = buf[-14] if len(buf) >= 14 else 0.0
-    lag_28 = buf[-28] if len(buf) >= 28 else 0.0
+    n   = len(buf)
 
-    # ---- rolling statistics ----
-    win7  = buf[-7:]  if len(buf) >= 7  else buf
-    win14 = buf[-14:] if len(buf) >= 14 else buf
-    win28 = buf[-28:] if len(buf) >= 28 else buf
+    lag_1  = buf[-1]  if n >= 1  else 0.0
+    lag_7  = buf[-7]  if n >= 7  else 0.0
+    lag_14 = buf[-14] if n >= 14 else 0.0
+    lag_21 = buf[-21] if n >= 21 else 0.0
+    lag_28 = buf[-28] if n >= 28 else 0.0
+    lag_56 = buf[-56] if n >= 56 else (buf[0] if buf else 0.0)
 
-    rolling_mean_7   = float(np.mean(win7))   if win7  else 0.0
-    rolling_mean_14  = float(np.mean(win14))  if win14 else 0.0
-    rolling_mean_28  = float(np.mean(win28))  if win28 else 0.0
-    rolling_std_7    = float(np.std(win7))    if len(win7)  > 1 else 0.0
-    rolling_std_14   = float(np.std(win14))   if len(win14) > 1 else 0.0
-    rolling_std_28   = float(np.std(win28))   if len(win28) > 1 else 0.0
-    rolling_median_7 = float(np.median(win7)) if win7  else 0.0
+    # ---- rolling statistics matching training.py ----
+    #
+    # training.py:  lag_base = sales.shift(28)
+    #   rmean_28_W = rolling(W).mean() over lag_base
+    #   rstd_28_W  = rolling(W).std()  over lag_base
+    #
+    # At time t, buf[-1]=sales(t-1), buf[-k]=sales(t-k).
+    # lag_base[t]   = sales(t-28) = buf[-28]
+    # lag_base[t-1] = sales(t-29) = buf[-29]
+    # ...
+    # lag_base[t-W+1] = sales(t-27-W) = buf[-(27+W)]
+    #
+    # rmean_28_W = mean of W consecutive lag_base values ending at t
+    #            = mean(buf[-(27+W) : -27])  if W < n-27
+    #
+    # For W in {7, 14, 28}:
+    #   rmean_28_7  = mean(buf[-34:-27])  needs n >= 34
+    #   rmean_28_14 = mean(buf[-41:-27])  needs n >= 41
+    #   rmean_28_28 = mean(buf[-55:-27])  needs n >= 55
+    #
+    # Similarly: lag_base_7 = sales.shift(7)
+    #   rmean_7_W = mean(buf[-(6+W) : -6])  if W < n-6
+
+    def _slice(shift: int, window: int) -> list:
+        """Extract the *window* values of lag_base(shift) ending at t.
+
+        Returns buf[-(shift-1+window) : -(shift-1)] which maps to
+        sales[t-shift], sales[t-shift-1], ..., sales[t-shift-window+1].
+        """
+        end = n - (shift - 1)       # exclusive right bound
+        start = end - window        # inclusive left bound
+        if start < 0:
+            start = 0
+        if end <= 0 or start >= n:
+            return []
+        return buf[start:end]
+
+    # rmean_28_* / rstd_28_* — lag base at shift=28
+    s28_7  = _slice(28, 7)
+    s28_14 = _slice(28, 14)
+    s28_28 = _slice(28, 28)
+
+    rmean_28_7  = _safe_mean(s28_7)
+    rstd_28_7   = _safe_std(s28_7)
+    rmean_28_14 = _safe_mean(s28_14)
+    rstd_28_14  = _safe_std(s28_14)
+    rmean_28_28 = _safe_mean(s28_28)
+    rstd_28_28  = _safe_std(s28_28)
+
+    # rmean_7_* / rstd_7_* — lag base at shift=7
+    s7_7  = _slice(7, 7)
+    s7_14 = _slice(7, 14)
+    s7_28 = _slice(7, 28)
+
+    rmean_7_7  = _safe_mean(s7_7)
+    rstd_7_7   = _safe_std(s7_7)
+    rmean_7_14 = _safe_mean(s7_14)
+    rstd_7_14  = _safe_std(s7_14)
+    rmean_7_28 = _safe_mean(s7_28)
+    rstd_7_28  = _safe_std(s7_28)
+
+    # ---- simple rolling stats (for legacy feature names) ----
+    win7  = buf[-7:]  if n >= 7  else buf
+    win14 = buf[-14:] if n >= 14 else buf
+    win28 = buf[-28:] if n >= 28 else buf
+
+    rolling_mean_7   = _safe_mean(win7)
+    rolling_mean_14  = _safe_mean(win14)
+    rolling_mean_28  = _safe_mean(win28)
+    rolling_std_7    = _safe_std(win7)
+    rolling_std_14   = _safe_std(win14)
+    rolling_std_28   = _safe_std(win28)
+    rolling_median_7 = float(np.median(win7)) if win7 else 0.0
 
     # ---- full lookup (keys must match xgb_features_{store_id}.json exactly) ----
     _lookup: Dict[str, float] = {
         # calendar basics
         "day_of_week":          float(dow),
         "dayofweek":            float(dow),
+        "wday":                 float(dow),
         "day_of_month":         float(dom),
         "dayofmonth":           float(dom),
+        "mday":                 float(dom),
         "month":                float(month),
         "year":                 float(year),
         "week_of_year":         float(woy),
         "weekofyear":           float(woy),
+        "week":                 float(woy),
         "day_of_year":          float(doy),
         "dayofyear":            float(doy),
         "quarter":              float(quarter),
@@ -281,6 +410,13 @@ def _build_xgb_row(
 
         # binary calendar flags
         "is_weekend":           float(dow >= 5),
+        "is_snap":              0.0,
+        "is_event_1":           0.0,
+        "is_event_2":           0.0,
+        "event_type_cultural":  0.0,
+        "event_type_national":  0.0,
+        "event_type_religious":  0.0,
+        "event_type_sporting":  0.0,
         "is_month_start":       float(dom == 1),
         "is_month_end":         float(
             dom == (date.replace(month=month % 12 + 1, day=1) - timedelta(days=1)).day
@@ -298,13 +434,32 @@ def _build_xgb_row(
         "sin_month":            float(np.sin(2 * np.pi * month / 12)),
         "cos_month":            float(np.cos(2 * np.pi * month / 12)),
 
-        # lag features — NOW FROM REAL BUFFER, not zeros
+        # lag features
         "lag_1":                lag_1,
         "lag_7":                lag_7,
         "lag_14":               lag_14,
+        "lag_21":               lag_21,
         "lag_28":               lag_28,
+        "lag_56":               lag_56,
 
-        # rolling statistics — NOW FROM REAL BUFFER, not zeros
+        # ---- TRAINING-ALIGNED rolling statistics ----
+        # rmean_28_W / rstd_28_W: rolling(W) over sales.shift(28)
+        "rmean_28_7":           rmean_28_7,
+        "rstd_28_7":            rstd_28_7,
+        "rmean_28_14":          rmean_28_14,
+        "rstd_28_14":           rstd_28_14,
+        "rmean_28_28":          rmean_28_28,
+        "rstd_28_28":           rstd_28_28,
+
+        # rmean_7_W / rstd_7_W: rolling(W) over sales.shift(7)
+        "rmean_7_7":            rmean_7_7,
+        "rstd_7_7":             rstd_7_7,
+        "rmean_7_14":           rmean_7_14,
+        "rstd_7_14":            rstd_7_14,
+        "rmean_7_28":           rmean_7_28,
+        "rstd_7_28":            rstd_7_28,
+
+        # legacy rolling stat names (backward compat)
         "rolling_mean_7":       rolling_mean_7,
         "rolling_mean_14":      rolling_mean_14,
         "rolling_mean_28":      rolling_mean_28,
@@ -313,11 +468,19 @@ def _build_xgb_row(
         "rolling_std_28":       rolling_std_28,
         "rolling_median_7":     rolling_median_7,
 
+        # categorical / ID placeholders (zero = "unknown")
+        "dept_id":              0.0,
+        "cat_id":               0.0,
+        "state_id":             0.0,
+
         # price features — unknown at inference, zero is the safest neutral
-        # Replace with real price data if your simulation tracks prices.
         "sell_price":           0.0,
+        "price_max":            0.0,
+        "price_min":            0.0,
+        "price_std":            0.0,
         "price_change":         0.0,
         "price_momentum":       0.0,
+        "price_pct_change":     0.0,
         "price_norm":           0.0,
     }
 
@@ -422,26 +585,30 @@ class DemandGenerator:
     # ------------------------------------------------------------------
 
     def _init_sales_buffer(self, seed: int, base_demand: float) -> Deque[float]:
-        """Return a 28-entry deque seeded with real M5 data if available.
+        """Return a 56-entry deque seeded with real M5 data if available.
 
         Falls back to synthetic values from the statistical baseline so the
         buffer is always full on day 0 regardless of file availability.
+
+        56 entries are required to compute ``rmean_28_28`` exactly:
+        ``rolling(28).mean()`` over ``sales.shift(28)`` needs sales from
+        ``t-28`` back to ``t-55``.
         """
         buf = _load_warmstart_buffer(self.store_id)
-        if buf is not None and len(buf) == 28:
+        if buf is not None and len(buf) >= 28:
             return buf
 
-        # Fallback: generate 28 synthetic days before day 0 using the baseline
+        # Fallback: generate 56 synthetic days before day 0 using the baseline
         warnings.warn(
             f"DemandGenerator[{self.store_id}]: seeding lag buffer from "
             f"statistical baseline (real M5 warm-start unavailable)."
         )
         fb = _StatisticalBaseline(self.store_id, base_demand=base_demand, seed=seed)
-        start = self.start_date - timedelta(days=28)
-        synthetic: Deque[float] = deque(maxlen=28)
-        for i in range(28):
+        start = self.start_date - timedelta(days=_BUFFER_MAXLEN)
+        synthetic: Deque[float] = deque(maxlen=_BUFFER_MAXLEN)
+        for i in range(_BUFFER_MAXLEN):
             d = start + timedelta(days=i)
-            synthetic.append(fb.predict(-(28 - i), d))
+            synthetic.append(fb.predict(-(_BUFFER_MAXLEN - i), d))
         return synthetic
 
     def _try_load_model(self) -> None:
