@@ -59,3 +59,38 @@ def test_compute_metric_bundle():
     metrics = compute_metric_bundle(actual, predicted)
     assert "rmse" in metrics
     assert "mae" in metrics
+
+from src.models.forecasting.training import engineer_features, prepare_prophet_data, _optuna_lgbm_params
+
+def test_engineer_features():
+    long_frame = pd.DataFrame({"d": ["d_1", "d_2"], "store_id": [1, 1], "item_id": [1, 1]})
+    calendar_df = pd.DataFrame({"d": ["d_1", "d_2"], "wm_yr_wk": ["2020-01-01", "2020-01-02"]})
+    prices_df = pd.DataFrame({"store_id": [1, 1], "item_id": [1, 1], "wm_yr_wk": ["2020-01-01", "2020-01-02"], "sell_price": [1.99, 1.99]})
+    
+    result = engineer_features(long_frame, calendar_df, prices_df)
+    
+    assert "date" in result.columns
+    assert "dayofweek" in result.columns
+    assert "sell_price" in result.columns
+
+def test_prepare_prophet_data():
+    df = pd.DataFrame({
+        "ds": pd.date_range("2020-01-01", periods=10),
+        "y": range(10),
+        "product_id": ["A"] * 5 + ["B"] * 5,
+        "store_id": ["S1"] * 5 + ["S2"] * 5
+    })
+    
+    result_A = prepare_prophet_data(df, product_id="A")
+    assert len(result_A) == 5
+    assert "ds" in result_A.columns
+    assert "y" in result_A.columns
+    
+    result_B = prepare_prophet_data(df, store_id="S2")
+    assert len(result_B) == 5
+
+def test_optuna_lgbm_params_no_optuna_or_zero_trials():
+    # Should return defaults when n_trials <= 0
+    params = _optuna_lgbm_params(pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), n_trials=0)
+    assert "n_estimators" in params
+    assert params["n_estimators"] == 800
