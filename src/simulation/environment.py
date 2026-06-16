@@ -193,6 +193,9 @@ class RetailSimulator:
                     )
                 ).mappings().all()
 
+                if not stores:
+                    raise Exception("DB exists but contains no stores (empty tables)")
+
                 self._load_from_rows(stores, products, inventory)
             finally:
                 db.close()
