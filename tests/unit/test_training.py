@@ -94,3 +94,42 @@ def test_optuna_lgbm_params_no_optuna_or_zero_trials():
     params = _optuna_lgbm_params(pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), n_trials=0)
     assert "n_estimators" in params
     assert params["n_estimators"] == 800
+
+from src.models.forecasting.training import train_lightgbm_model, train_xgboost_model, train_prophet_model, build_wrmsse_evaluator
+
+def test_train_lightgbm_model():
+    train_frame = pd.DataFrame({"f1": [1.0, 2.0]*50, "f2": [2.0, 3.0]*50, "sales": [10.0, 20.0]*50})
+    val_frame = pd.DataFrame({"f1": [1.0, 2.0]*10, "f2": [2.0, 3.0]*10, "sales": [10.0, 20.0]*10})
+    model, metrics = train_lightgbm_model(train_frame, val_frame, feature_columns=["f1", "f2"])
+    assert model is not None
+    assert "rmse" in metrics
+
+def test_train_xgboost_model():
+    train_frame = pd.DataFrame({"f1": [1.0, 2.0]*50, "f2": [2.0, 3.0]*50, "sales": [10.0, 20.0]*50})
+    val_frame = pd.DataFrame({"f1": [1.0, 2.0]*10, "f2": [2.0, 3.0]*10, "sales": [10.0, 20.0]*10})
+    model, metrics = train_xgboost_model(train_frame, val_frame, feature_columns=["f1", "f2"])
+    assert model is not None
+    assert "rmse" in metrics
+
+def test_train_prophet_model():
+    df = pd.DataFrame({
+        "ds": pd.date_range("2020-01-01", periods=10),
+        "y": range(10)
+    })
+    model = train_prophet_model(df)
+    assert model is not None
+
+def test_build_wrmsse_evaluator():
+    long_frame = pd.DataFrame({
+        "id": ["A", "B"], 
+        "sales": [1, 2], 
+        "d_num": [1, 1],
+        "item_id": [1, 2],
+        "dept_id": [1, 1],
+        "cat_id": [1, 1],
+        "store_id": [1, 1],
+        "state_id": [1, 1]
+    })
+    weights = pd.DataFrame({"id": ["A", "B"], "weight": [0.5, 0.5]})
+    evaluator = build_wrmsse_evaluator(long_frame, weights)
+    assert evaluator is not None

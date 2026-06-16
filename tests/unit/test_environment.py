@@ -13,3 +13,21 @@ def test_generators_load_models(mock_try_load):
     for gen in sim.demand_generators.values():
         gen._using_model = True
         assert gen.using_trained_model is True
+
+def test_inject_disruption_viral_trend():
+    sim = RetailSimulator()
+    sim.inject_disruption("viral_trend", severity="high")
+    assert sim.active_demand_multiplier == 4.0
+
+def test_inject_disruption_supplier_delay():
+    sim = RetailSimulator()
+    sim.inject_disruption("supplier_delay", severity="low")
+    for agent in sim.inventory_agents.values():
+        assert agent.lead_time == 7
+
+def test_inject_disruption_inventory_loss():
+    sim = RetailSimulator()
+    original_stock = sum(sim.db_inventory.values())
+    sim.inject_disruption("inventory_loss", severity="high")
+    new_stock = sum(sim.db_inventory.values())
+    assert new_stock < original_stock
