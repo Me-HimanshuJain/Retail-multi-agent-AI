@@ -9,6 +9,7 @@ sqlalchemy==2.0.30
 alembic==1.13.1
 psycopg2-binary==2.9.9
 bcrypt==5.0.0
+slowapi==0.1.9
 python-jose[cryptography]==3.3.0
 redis[hiredis]==5.0.7
 numpy==1.26.4

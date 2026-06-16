@@ -1,14 +1,13 @@
 """Forecast API routes backed by trained model artifacts."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from src.api.limiter import limiter
 
 from src.api.auth import User, any_authenticated
 from src.models.forecasting.lgbm_io import load_lgbm_booster
@@ -66,14 +65,19 @@ def forecast_health() -> dict:
 
 
 @router.post("/predict", response_model=ForecastResponse)
-def predict_forecast(
-    request: ForecastRequest,
+async def predict_forecast(
+    request: Request,
+    body: ForecastRequest,
     _current_user: User = Depends(any_authenticated),
 ) -> ForecastResponse:
-    frame = pd.DataFrame([request.features])
+    # Programmatic rate limiting
+    request.app.state.limiter._check_request_limit(
+        request, predict_forecast, False
+    )
+    frame = pd.DataFrame([body.features])
 
-    store = request.store
-    requested = request.model
+    store = body.store
+    requested = body.model
 
     # Ensemble preferred when auto and available
     if requested == "ensemble" or (requested == "auto" and (Path("models") / f"ensemble_{store}.bin").exists()):
@@ -93,7 +97,7 @@ def predict_forecast(
                 try:
                     lgbm = _load_lgb_model(store)
                     features = list(lgbm.feature_name()) if hasattr(lgbm, "feature_name") else []
-                    aligned = pd.DataFrame([{feature: float(request.features.get(feature, 0.0)) for feature in features}])
+                    aligned = pd.DataFrame([{feature: float(body.features.get(feature, 0.0)) for feature in features}])
                     member_forecasts[member] = np.asarray(lgbm.predict(aligned), dtype=float)
                 except HTTPException:
                     continue
@@ -123,7 +127,7 @@ def predict_forecast(
     if requested in {"auto", "lgbm"} and (Path("models") / f"lgb_model_{store}.bin").exists():
         model = _load_lgb_model(store)
         features = list(model.feature_name()) if hasattr(model, "feature_name") else []
-        aligned = pd.DataFrame([{feature: float(request.features.get(feature, 0.0)) for feature in features}])
+        aligned = pd.DataFrame([{feature: float(body.features.get(feature, 0.0)) for feature in features}])
         median_np = model.predict(aligned)
         median = np.asarray(median_np, dtype=float)
         spread = np.maximum(np.abs(median) * 0.08, 1e-6)

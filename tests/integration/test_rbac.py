@@ -13,6 +13,14 @@ from src.api.main import app
 
 client = TestClient(app, raise_server_exceptions=False)
 
+import uuid
+import pytest
+
+@pytest.fixture(autouse=True)
+def isolate_rate_limits():
+    """Give each test a unique IP so the rate limiter state doesn't bleed."""
+    client.headers["x-forwarded-for"] = str(uuid.uuid4())
+
 
 def _get_token(username: str, password: str) -> str:
     """Helper: obtain a JWT for the given credentials."""

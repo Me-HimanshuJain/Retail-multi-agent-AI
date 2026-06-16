@@ -21,11 +21,19 @@ class Settings:
     API_RELOAD: bool = os.getenv("API_RELOAD", "false").lower() == "true"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRATION_MINUTES: int = int(os.getenv("JWT_EXPIRATION_MINUTES", "1440"))
+    # P1: Default reduced from 1440 (24 h) to 30 min — use REFRESH_TOKEN_TTL_SECONDS for long sessions
+    JWT_EXPIRATION_MINUTES: int = int(os.getenv("JWT_EXPIRATION_MINUTES", "30"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE: str = os.getenv("LOG_FILE", "logs/app.log")
     MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
     MLFLOW_EXPERIMENT_NAME: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "retail_multi_agent")
+    # P1: CORS allowlist — comma-separated origins; Streamlit dashboard defaults included
+    CORS_ALLOWED_ORIGINS: str = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501",
+    )
+    # P1: Opaque refresh token lifetime (7 days default)
+    REFRESH_TOKEN_TTL_SECONDS: int = int(os.getenv("REFRESH_TOKEN_TTL_SECONDS", "604800"))
 
     def __post_init__(self) -> None:
         if self.SECRET_KEY == "change-me":
@@ -45,8 +53,14 @@ class Settings:
                 "  ╚══════════════════════════════════════════════════════════╝\n"
             )
 
+    @property
+    def cors_origins_list(self) -> list:
+        """Parse CORS_ALLOWED_ORIGINS into a list of stripped origin strings."""
+        return [o.strip() for o in self.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+
 
 settings = Settings()
+
 
 
 
